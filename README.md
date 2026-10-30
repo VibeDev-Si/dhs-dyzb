@@ -12,6 +12,8 @@
 
 ![预览](preview.png)
 
+仓库：<https://github.com/newbeejmc/Dsh_douyin>
+
 ---
 
 ## 1. 三步跑起来
@@ -20,9 +22,14 @@
 :: 1) 装两个小依赖（只有弹幕直连用得到：ws + protobufjs）
 npm install
 
-:: 2) 启动（默认 8787 端口）
+:: 2) 第一次跑，先把示例配置复制一份（里面有 Key、房间号要你自己填）
+copy config.example.json config.json
+
+:: 3) 启动（默认 8787 端口）
 node server.mjs
 ```
+
+> 仓库里只有 `config.example.json`（Key 和房间号都是空的）；`config.json` 是你的真实配置，已被 `.gitignore` 排除，不会上传。
 
 2. **双击 `打开直播间.cmd`** —— 打开一个没有地址栏的 1920×1080 窗口，**带声音、不用点任何东西**（内部就是 `chrome --autoplay-policy=no-user-gesture-required --app=http://127.0.0.1:8787/?auto=1`）。
    不想用这个窗口，也可以自己开浏览器访问 <http://127.0.0.1:8787>，但第一次要点一下页面底部的「🔊 点一下，开启声音」。
