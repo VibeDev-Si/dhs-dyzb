@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>大肥鱼 · 操作台</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐋</text></svg>" />
+<link rel="stylesheet" href="/admin.css" />
+</head>
+<body>
+<header class="top">
+  <div class="brand">🐋 大肥鱼 · 操作台</div>
+  <div class="top-right">
+    <span class="pill" id="conn">连接中…</span>
+    <a class="pill link" href="/" target="_blank">打开直播画面 ↗</a>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button class="tab active" data-pane="basic">① 基础设置</button>
+  <button class="tab" data-pane="story">② 故事电台</button>
+  <button class="tab" data-pane="board">③ 数据看板</button>
+</nav>
+
+<main>
+  <!-- ================= ① 基础设置 ================= -->
+  <div class="pane active" id="pane-basic">
+
+    <section class="panel">
+      <h2>接入 DeepSeek</h2>
+      <p class="hint">Key 只存在本机 <code>config.json</code>，不会发给除 api.deepseek.com 之外的地方。</p>
+      <div class="row">
+        <label>API Key</label>
+        <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" />
+        <button id="saveKey" class="primary">保存</button>
+      </div>
+      <div class="row">
+        <label>模型</label>
+        <select id="model">
+          <option value="deepseek-flash">deepseek-flash（便宜，够用）</option>
+          <option value="deepseek-v4-pro">deepseek-v4-pro（贵 4.5 倍，话更好听）</option>
+        </select>
+        <label class="inline"><input id="autoReply" type="checkbox" /> 弹幕来了自动回</label>
+        <button id="testAi">测一句话</button>
+      </div>
+      <div class="row">
+        <label>备用模型</label>
+        <input id="fallbackModel" placeholder="deepseek-chat（主模型 503 时自动换）" style="flex:1" autocomplete="off" />
+        <button id="saveFallback">保存</button>
+      </div>
+      <div class="row">
+        <label>备用接口</label>
+        <input id="backupBase" placeholder="https://api.deepseek.com（换一家 API 时填）" style="flex:1" autocomplete="off" />
+        <input id="backupKey" type="password" placeholder="备用 Key" style="flex:0 0 200px" autocomplete="off" />
+        <button id="saveBackup">保存</button>
+      </div>
+      <div class="row">
+        <label>备用模型名</label>
+        <input id="backupModel" placeholder="deepseek-flash（留空就跟主模型一样）" style="flex:1" autocomplete="off" />
+      </div>
+      <p class="hint">
+        主模型撞上 503「服务太忙」时会自动退避重试 3 次，还不行就换备用模型，再不行才换备用接口。三段都试过才会降级成兜底稿。
+      </p>
+      <div class="result" id="aiResult"></div>
+      <div class="result" id="aiHealth"></div>
+    </section>
+
+    <section class="panel">
+      <h2>弹幕接入（不用浏览器）</h2>
+      <p class="hint">
+        填直播间号（或 <code>live.douyin.com/&lt;号&gt;</code> 链接），点连接。程序直接连抖音网页直播的弹幕流，抓弹幕、礼物、进场、关注、点赞——不占浏览器、不用装扩展。开播前填也行：没开播时会每 15 秒看一眼，开播自动连上。
+      </p>
+      <div class="row">
+        <label>直播间号</label>
+        <input id="dmRoom" placeholder="857365080423 或 https://live.douyin.com/857365080423" style="flex:1" autocomplete="off" />
+        <button id="dmConnect" class="primary">连接</button>
+        <button id="dmDisconnect">断开</button>
+      </div>
+      <div class="result" id="dmResult">还没连接</div>
+    </section>
+
+    <section class="panel">
+      <h2>声音 · 音乐</h2>
+      <div class="row">
+        <label>音源</label>
+        <select id="muProvider">
+          <option value="auto">自动（先本地曲库，再网易云）</option>
+          <option value="local">只用本地曲库</option>
+          <option value="netease">只用网易云外链</option>
+          <option value="custom">自建 NeteaseCloudMusicApi</option>
+        </select>
+        <button id="muSave" class="primary">保存</button>
+      </div>
+      <div class="row">
+        <label>本地目录</label>
+        <input id="muDir" placeholder="music" style="flex:1" />
+        <button id="muReindex">重新扫描</button>
+      </div>
+      <div class="row">
+        <label>自建源</label>
+        <input id="muApiBase" placeholder="http://127.0.0.1:3000（NeteaseCloudMusicApi）" style="flex:1" />
+      </div>
+      <div class="row slider-row">
+        <label>音乐音量</label>
+        <input id="muVolume" type="range" min="0" max="1" step="0.01" value="0.75" />
+        <span class="slider-val" id="muVolumeVal">75%</span>
+      </div>
+      <div class="row">
+        <label>试听 / 排障</label>
+        <button id="muPreviewBtn" class="primary">▶ 试听当前这首歌</button>
+        <button id="muPreviewStop">■ 停止</button>
+        <button id="muBeep" title="放一声提示音，用来确认浏览器/系统到底出不出声">🔔 测试音</button>
+        <span class="hint" id="muPreviewState" style="flex:1;min-width:0">还没播</span>
+      </div>
+      <div class="row">
+        <label>搜索测试</label>
+        <input id="muQuery" placeholder="输入歌名，看能不能找到音源" style="flex:1" />
+        <button id="muSearch">搜一下</button>
+        <button id="muResolve">解析当前歌</button>
+      </div>
+      <div class="hint" id="muStatus">—</div>
+      <div class="pending" id="muResults"></div>
+      <audio id="muPreview" preload="none"></audio>
+    </section>
+
+    <section class="panel">
+      <h2>声音 · 大肥鱼</h2>
+      <div class="row slider-row">
+        <label>大肥鱼音量</label>
+        <input id="voVolume" type="range" min="0" max="1" step="0.01" value="0.9" />
+        <span class="slider-val" id="voVolumeVal">90%</span>
+        <button id="voTest">试听</button>
+      </div>
+      <div class="row">
+        <label>朗读</label>
+        <label class="switch">
+          <input id="voEnabled" type="checkbox" checked />
+          <span>讲每段时出声</span>
+        </label>
+        <label style="min-width:auto">音色</label>
+        <select id="voEngine" style="width:230px">
+          <optgroup label="在线音色（快，需要联网）">
+            <option value="edge:natural">自然 · 晓晓</option>
+            <option value="edge:warm">温柔 · 晓晓</option>
+            <option value="edge:leng">御姐 · 冷</option>
+            <option value="edge:diyin">御姐 · 低</option>
+            <option value="edge:xiaoxiao">原味 · 晓晓</option>
+          </optgroup>
+          <optgroup label="本地音色（不联网，合成慢一点）">
+            <option value="kokoro:xiaobei">本地 · 小北</option>
+            <option value="kokoro:xiaoni">本地 · 小妮</option>
+            <option value="kokoro:xiaoxiao">本地 · 晓晓</option>
+            <option value="kokoro:xiaoyi">本地 · 晓伊</option>
+          </optgroup>
+          <optgroup label="备用">
+            <option value="sapi:sapi">系统语音（离线 Huihui）</option>
+          </optgroup>
+        </select>
+        <label style="min-width:auto">语速</label>
+        <select id="voRate" style="width:110px">
+          <option value="0.8">慢一点</option>
+          <option value="1" selected>正常</option>
+          <option value="1.15">快一点</option>
+          <option value="1.3">很快</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>音色细节</label>
+        <span class="hint" id="voName" style="flex:1;min-width:0"></span>
+        <button id="voList">刷新音色</button>
+      </div>
+      <div class="result" id="voResult"></div>
+    </section>
+
+    <section class="panel">
+      <h2>造一条弹幕（不连抖音也能试）</h2>
+      <div class="row">
+        <label>昵称</label><input id="tName" value="测试观众" />
+      </div>
+      <div class="row">
+        <label>内容</label><input id="tText" value="点歌 平凡之路" placeholder="点歌 xxx / 切歌 / 随便聊" />
+        <button id="sendChat" class="primary">发弹幕</button>
+      </div>
+      <div class="row">
+        <label>礼物</label>
+        <select id="tGift"></select>
+        <input id="tCount" type="number" min="1" value="1" style="width:80px" />
+        <button id="sendGift">送礼</button>
+        <button id="sendEnter">有人进场</button>
+      </div>
+      <div class="row">
+        <label>手动说话</label>
+        <input id="sayText" placeholder="以主播身份在直播间发一条（会被扩展打进抖音）" />
+        <button id="sendSay">发送</button>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= ② 故事电台 ================= -->
+  <div class="pane" id="pane-story">
+    <section class="panel">
+      <h2>故事电台 · 这一场</h2>
+      <p class="hint">
+        一场 60 分钟：开场 10 分钟 → 5 轮「讲 6 分钟 + 互动 4 分钟」。开场、每段、默认后续、观众可选方向都在这里改；保存会从这一场开头重讲。
+      </p>
+      <div class="row">
+        <label>标题</label>
+        <input id="stTitle" style="flex:1" />
+        <label>类型</label>
+        <input id="stGenre" style="width:240px" />
+      </div>
+      <div class="row">
+        <label>时间</label>
+        开场 <input id="stOpenerMin" type="number" min="1" max="60" style="width:72px" /> 分
+        讲述 <input id="stStoryMin" type="number" min="1" max="30" style="width:72px" /> 分
+        互动 <input id="stInteractMin" type="number" min="1" max="30" style="width:72px" /> 分
+        整场 <input id="stTotalMin" type="number" min="10" max="180" style="width:72px" /> 分
+      </div>
+
+      <div class="story-fields">
+        <label>世界观<textarea id="stWorld" rows="3"></textarea></label>
+        <label>主角<textarea id="stHero" rows="3"></textarea></label>
+        <label>主要人物<textarea id="stCast" rows="3"></textarea></label>
+        <label>核心冲突<textarea id="stConflict" rows="3"></textarea></label>
+        <label>还没解开的谜<textarea id="stMystery" rows="3"></textarea></label>
+        <label>最终结局方向<textarea id="stEnding" rows="2"></textarea></label>
+        <label>不能改的设定（一行一条）<textarea id="stImmutable" rows="3"></textarea></label>
+        <label>可被观众改的（一行一条）<textarea id="stChangeable" rows="3"></textarea></label>
+      </div>
+
+      <label class="field-label">开场（一行一拍，约 10 分钟讲完）</label>
+      <textarea id="stOpener" rows="6" spellcheck="false"></textarea>
+
+      <label class="field-label">五段故事（一场 5 段，每段一拍一行）</label>
+      <div id="stRounds"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="stAddRound">+ 加一段</button>
+      </div>
+
+      <div class="row" style="margin-top:12px">
+        <button id="storySave" class="primary">保存设定并重讲</button>
+        <button id="storyStart">开始这一场</button>
+        <button id="storyNext" class="primary">讲下一段</button>
+        <button id="storyStop">停下</button>
+        <label class="inline"><input id="storyAuto" type="checkbox" /> 自动往下讲</label>
+        <button id="storyReset">从头再来</button>
+      </div>
+      <div class="result" id="storyResult"></div>
+    </section>
+  </div>
+
+  <!-- ================= ③ 数据看板 ================= -->
+  <div class="pane" id="pane-board">
+    <section class="panel">
+      <h2>今天</h2>
+      <div class="grid" id="stats"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="refreshBalance">刷新余额</button>
+        <button id="nextSong">切歌</button>
+        <button id="resetDay" class="danger">清空今日数据</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>礼物与点歌</h2>
+      <div class="board-2">
+        <div>
+          <div class="field-label">今天收到的礼物</div>
+          <ul id="boardGifts" class="list"></ul>
+        </div>
+        <div>
+          <div class="field-label">点歌队列</div>
+          <ul id="boardQueue" class="list"></ul>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>发送箱</h2>
+      <div class="hint">如果一直是 pending：检查 Chrome 扩展是否开着、直播间页面是否在、配置里的地址是否是 <code id="srvAddr"></code></div>
+      <ul id="outbox" class="list"></ul>
+    </section>
+
+    <section class="panel">
+      <h2>最近事件</h2>
+      <ul id="log" class="list"></ul>
+    </section>
+  </div>
+</main>
+
+<template id="roundTpl">
+  <div class="round-card">
+    <div class="row">
+      <label>第 <span data-n>1</span> 段</label>
+      <input data-f="chapter" style="flex:1" placeholder="第一章 · 涨潮后的门铃" />
+      <button data-act="del" class="danger">删掉这段</button>
+    </div>
+    <textarea data-f="beats" rows="4" spellcheck="false" placeholder="一拍一行"></textarea>
+    <div class="row">
+      <label>默认后续</label>
+      <input data-f="defaultNext" style="flex:1" placeholder="没人提建议时，顺着这条往下走" />
+    </div>
+    <div class="row">
+      <label>给观众的方向</label>
+      <input data-f="choices" style="flex:1" placeholder="2–3 条，用 | 隔开" />
+    </div>
+  </div>
+</template>
+
+<script src="/admin.js"></script>
+</body>
+</html>

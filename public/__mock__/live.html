@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>弹幕桥自测页</title>
+<style>
+  body { font-family: system-ui, "Microsoft YaHei", sans-serif; background: #1d1d22; color: #eee; margin: 0; padding: 20px; }
+  .webcast-chatroom___list { height: 520px; overflow: hidden; display: flex; flex-direction: column; gap: 6px; }
+  .webcast-chatroom___item { font-size: 15px; }
+  .webcast-chatroom___item .name { color: #7fd3ff; margin-right: 6px; }
+  .webcast-chatroom___gift { color: #ffd479; }
+  .webcast-chatroom___input { margin-top: 12px; display: flex; gap: 8px; }
+  textarea { width: 420px; height: 40px; font-size: 15px; padding: 8px; border-radius: 8px; border: 1px solid #555; background: #2a2a31; color: #fff; }
+  button { width: 90px; height: 40px; border-radius: 8px; border: 0; background: #fe2c55; color: #fff; font-size: 15px; }
+</style>
+</head>
+<body>
+  <h3>模拟抖音直播间（仅用于自测弹幕桥）</h3>
+  <div class="webcast-chatroom___list" id="list"></div>
+  <div class="webcast-chatroom___input">
+    <textarea id="input" placeholder="说点什么..."></textarea>
+    <button id="send">发送</button>
+  </div>
+<script>
+  const list = document.getElementById('list');
+  const input = document.getElementById('input');
+  const btn = document.getElementById('send');
+
+  function add(cls, name, body) {
+    const d = document.createElement('div');
+    d.className = 'webcast-chatroom___item ' + cls;
+    d.innerHTML = '<span class="name"></span><span class="body"></span>';
+    d.querySelector('.name').textContent = name + '：';
+    d.querySelector('.body').textContent = body;
+    list.appendChild(d);
+    while (list.children.length > 40) list.removeChild(list.firstChild);
+  }
+
+  btn.addEventListener('click', () => {
+    const t = input.value.trim();
+    if (!t) return;
+    add('mine', '我', t);
+    input.value = '';
+    window.__sent = (window.__sent || []).concat(t);
+  });
+
+  const seed = [
+    ['七月', '来了'],
+    ['晚风', '点歌 晴天'],
+    ['白桃汽水', '送出 嘉年华 ×1'],
+    ['小行星', '你是真人吗'],
+    ['Rin', '关注了主播'],
+    ['阿离', '送出 小心心 ×3'],
+    ['鲸鱼小饼干', '主播今天写字好认真'],
+    ['不睡觉的猫', '为主播点赞了'],
+    ['七月', '点歌 平凡之路'],
+  ];
+  let i = 0;
+  add('', '鲸鱼小饼干', '进入直播间');
+  setInterval(() => {
+    const [n, b] = seed[i % seed.length];
+    i += 1;
+    add('', n, b);
+  }, 1400);
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+# 依赖与本地数据（不进仓库）
+node_modules/
+data/
+*.log
+.tmp-ext/
+.DS_Store
+
+# 本机的真实配置（含 DeepSeek Key、房间号），仓库里只有 config.example.json
+config.json
+
+# 本地语音模型与合成产物（桌面端各自下载，见 README 4.6）
+tts-kokoro/*.onnx
+tts-kokoro/*.wav
+.tts-*
+
+# 本地曲库与训练素材（版权原因不进仓库）
+music/*.mp3
+music/*.m4a
+music/*.flac
+music/*.wav
+music/*.ogg
+voice-src/*.wav
+voice-src/*.mp3
+voice-src/*.m4a

@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>大肥鱼 · 写故事直播间</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="scene" id="scene">
+      <div class="bglayer" id="bglayer">
+        <div class="orb orb-a"></div>
+        <div class="orb orb-b"></div>
+        <div class="orb orb-c"></div>
+        <div class="grain"></div>
+      </div>
+
+      <div class="stage">
+        <!-- 左上：今日 token 消耗（小） -->
+        <section class="card glass token-card" id="tokenCard">
+          <div class="token-main">
+            <span class="card-kicker plain">
+              今日 token 消耗
+              <span class="peak-tag" id="peakTag" hidden>高峰</span>
+            </span>
+            <span class="spent"><span class="cur">¥</span><span id="spentVal">0.00</span></span>
+          </div>
+          <div class="token-sub">
+            <span id="tokenToday">0</span> token 今天 · <span id="tokenLife">0</span> 累计
+          </div>
+          <div class="bal-row">
+            <span class="bal-label">余额</span>
+            <span class="bal-val dim" id="balVal">未绑定</span>
+          </div>
+        </section>
+
+        <!-- 中上：礼物 -->
+        <section class="card glass giftbar">
+          <div class="gift-head">
+            <span class="card-kicker">礼物 · 今天</span>
+            <span class="income"><span class="cur">¥</span><span id="incomeVal">0.00</span></span>
+            <span class="gift-count" id="giftCount">还没有收到礼物</span>
+          </div>
+          <ul class="gift-list" id="giftList"></ul>
+          <div class="gift-thanks" id="giftThanks" hidden>
+            <span class="thanks-text" id="thanksText"></span>
+          </div>
+          <div class="gift-foot" id="giftFoot">图鉴 0/11</div>
+        </section>
+
+        <!-- 右上：点歌队列 -->
+        <section class="card glass queue-card">
+          <div class="card-kicker">点歌队列 <span class="queue-n" id="queueN">0 首</span></div>
+          <div class="now" id="nowPlaying">
+            <button class="play-btn" id="playBtn" type="button" title="播放 / 暂停">▶</button>
+            <span class="now-text" id="nowText">还没有点歌</span>
+            <span class="src-tag" id="srcTag" hidden></span>
+          </div>
+          <div class="progress-line" id="musicProgress"><i id="musicBar"></i></div>
+          <ol class="queue" id="queueList"></ol>
+          <div class="queue-hint">弹幕里发「点歌 歌名」就能排队</div>
+          <audio id="player" preload="none"></audio>
+          <audio id="voicePlayer" preload="auto"></audio>
+        </section>
+
+        <!-- 左侧：弹幕 -->
+        <div class="danmaku-wrap">
+          <div class="danmaku-head">
+            <span class="card-kicker">弹幕</span>
+            <span class="danmaku-n" id="danmakuN"></span>
+            <span class="spacer"></span>
+            <span class="phase-chip" id="phaseChip">准备开讲</span>
+            <span class="clock" id="clock">59:00</span>
+          </div>
+          <div class="danmaku" id="feed">
+            <div class="danmaku-empty" id="danmakuEmpty">弹幕会从这儿滚过去</div>
+          </div>
+        </div>
+
+        <!-- 中间：故事 -->
+        <section class="story">
+          <header class="story-head">
+            <div class="kicker">今晚的故事</div>
+            <h1 id="storyTitle">鲸鱼邮局的第七封信</h1>
+            <div class="story-meta">
+              <span id="storyChapter">准备开讲</span>
+              <span class="sep">·</span>
+              <span id="storyBeat">第 0 拍</span>
+              <div class="progress"><i id="storyBar"></i></div>
+              <span class="spacer"></span>
+              <span class="live-dot"></span>
+              <span class="live-text" id="liveText">讲述中</span>
+            </div>
+          </header>
+
+          <div class="paper" id="paper">
+            <div class="paper-mark" aria-hidden="true"></div>
+            <div class="bubble" id="bubble">
+              <span class="bubble-placeholder">灯亮着，纸上还空着第一行——等本鲸开口。</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 中下：本段总结 -->
+        <section class="summary-card" id="summaryCard">
+          <div class="summary-head">
+            <span class="card-kicker">本段总结</span>
+            <span class="summary-chapter" id="summaryChapter"></span>
+          </div>
+          <p class="summary-text" id="summaryText">这一段讲完，本鲸会把发生的事、拿到什么线索、留下什么悬念，缩成三两句放这儿。</p>
+        </section>
+
+        <!-- 右下：大肥鱼的活动范围 -->
+        <div class="pet-zone" id="petZone">
+          <div class="pet-glow"></div>
+          <video class="pet" id="pet" src="assets/pet/idle.webm" autoplay loop muted playsinline></video>
+          <div class="soft-fallback" id="softFallback" hidden>🐋</div>
+          <div class="nameplate">大肥鱼 · 蓝毛小鲸鱼女仆</div>
+          <div class="toast" id="toast"></div>
+        </div>
+      </div>
+
+      <!-- 浏览器不让自动出声时，点它一下就把两个播放器都唤醒 -->
+      <button class="sound-unlock" id="soundUnlock" hidden>🔊 点一下，开启声音</button>
+    </div>
+
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
