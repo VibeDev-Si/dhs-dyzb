@@ -165,7 +165,7 @@ function addMessage(item, { animate = true } = {}) {
   }
 
   feed.appendChild(node);
-  while (feed.children.length > 40) feed.removeChild(feed.firstElementChild);
+  while (feed.children.length > 50) feed.removeChild(feed.firstElementChild);
   scrollFeed();
 
   if (item.kind === 'gift') {
@@ -540,7 +540,7 @@ function applyInit(payload, { replay = true } = {}) {
   feed.innerHTML = '';
   state.events = [];
   if (replay) {
-    for (const item of (payload.events || []).slice(-24)) {
+    for (const item of (payload.events || []).slice(-50)) {
       state.events.push(item);
       addMessage(item, { animate: false });
     }
@@ -567,8 +567,15 @@ function connect() {
         break;
       case 'event':
         state.events.push(payload.item);
-        if (state.events.length > 200) state.events.splice(0, state.events.length - 200);
+        if (state.events.length > 50) state.events.splice(0, state.events.length - 50);
         addMessage(payload.item);
+        break;
+      case 'boot':
+        state.events = [];
+        feed.innerHTML = '';
+        state.song = payload.song || state.song;
+        renderSong(payload.song);
+        if (payload.stats) renderStats(payload.stats);
         break;
       case 'stats':
         renderStats(payload.stats);
@@ -611,7 +618,23 @@ function connect() {
 
 /* 从弹幕里认出「点歌」提示一下（真正入队由服务端做） */
 initPlayer();
-connect();
+
+/* 每次打开直播窗先清场：音乐队列、消息队列、弹幕都归零（?keep=1 可跳过，调试用） */
+const KEEP_STATE = new URLSearchParams(location.search).has('keep');
+async function bootSession() {
+  if (KEEP_STATE) return;
+  try {
+    const r = await fetch(`${SERVER}/api/session/boot`, { method: 'POST' });
+    if (r.ok) {
+      const d = await r.json();
+      const c = d.cleared || {};
+      console.log(`[boot] 清场：音乐 ${c.song || 0} 首、消息 ${c.events || 0} 条`);
+    }
+  } catch {
+    /* 服务没起来也要能连 SSE */
+  }
+}
+bootSession().finally(connect);
 
 /* ---------- 声音：默认「打开就有声」，不带 ?auto=1 时留一个兜底按钮 ---------- */
 const unlockBtn = document.getElementById('soundUnlock');

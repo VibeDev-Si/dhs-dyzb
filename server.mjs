@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 import { ROOT, loadConfig, getConfig, updateConfig, saveConfig, publicConfig, assertPatch } from './lib/config.mjs';
-import { initStore, getState, getLifetime, recordEvent, addAiUsage, addAiEvent, addUsageOnly, pushPlaylist, nextSong, setCurrentSong, patchCurrentSong, addEventOnly, resetDay, flush } from './lib/store.mjs';
+import { initStore, getState, getLifetime, recordEvent, addAiUsage, addAiEvent, addUsageOnly, pushPlaylist, nextSong, setCurrentSong, patchCurrentSong, addEventOnly, resetDay, flush, scheduleSave } from './lib/store.mjs';
 import { beijing, isPeak, ratesFor, costOf } from './lib/pricing.mjs';
 import { chatCompletion, fetchBalance } from './lib/ai.mjs';
 import { buildMessages, commandReply } from './lib/persona.mjs';
@@ -862,7 +862,7 @@ const server = createServer(async (req, res) => {
         balance,
         song: songView(),
         gifts: getConfig().gifts,
-        events: getState().events.slice(-80).map(eventView),
+        events: getState().events.slice(-50).map(eventView),
         story: storyView(getConfig()),
         danmaku: danmakuView(),
         aiError: aiLastError,
@@ -882,6 +882,30 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // ---- 打开直播窗时清场：音乐队列、消息队列、弹幕（最多留 50 条）----
+    if (p === '/api/session/boot' && req.method === 'POST') {
+      const s = getState();
+      const clearedPlaylist = s.playlist.length + (s.currentSong ? 1 : 0);
+      const clearedEvents = s.events.length;
+      s.playlist = [];
+      s.currentSong = null;
+      s.events = [];
+      const clearedOutbox = outbox.length;
+      outbox.length = 0;
+      outboxSeq = 1;
+      const clearedReplies = replyQueue.length;
+      replyQueue.length = 0;
+      scheduleSave();
+      broadcast({ type: 'boot', song: songView(), stats: statsView(), events: [] });
+      console.log(
+        `[boot] 直播窗打开，清场：音乐 ${clearedPlaylist} 首、消息 ${clearedEvents} 条、发送箱 ${clearedOutbox} 条、待回复 ${clearedReplies} 条`,
+      );
+      return json(res, 200, {
+        ok: true,
+        cleared: { song: clearedPlaylist, events: clearedEvents, outbox: clearedOutbox, replies: clearedReplies },
+      });
+    }
+
     if (p === '/api/state' && req.method === 'GET') {
       return json(res, 200, {
         ok: true,
@@ -890,7 +914,7 @@ const server = createServer(async (req, res) => {
         balance,
         song: songView(),
         gifts: getConfig().gifts,
-        events: getState().events.slice(-80).map(eventView),
+        events: getState().events.slice(-50).map(eventView),
         story: storyView(getConfig()),
         danmaku: danmakuView(),
         aiError: aiLastError,
