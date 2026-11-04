@@ -159,7 +159,16 @@ function setMood(name, holdMs = 0) {
   }
 }
 
+/* 哪个动作文件坏了就退回待机动画；待机也放不出来，才收起来换成 🐋 */
 pet.addEventListener('error', () => {
+  const idleSrc = MOODS.idle;
+  if (pet.dataset.fellBack !== '1' && pet.getAttribute('src') !== idleSrc) {
+    pet.dataset.fellBack = '1';
+    currentMood = 'idle';
+    pet.src = idleSrc;
+    el.pet.play?.()?.catch?.(() => {});
+    return;
+  }
   pet.style.display = 'none';
   fallback.hidden = false;
 });
