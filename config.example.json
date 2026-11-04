@@ -1,5 +1,6 @@
 {
   "port": 8787,
+  "mode": "radio",
   "roomId": "",
   "danmaku": {
     "mode": "auto",
@@ -231,7 +232,7 @@
     }
   ],
   "music": {
-    "provider": "netease",
+    "provider": "local",
     "dir": "music",
     "volume": 0.11,
     "queueMax": 3,
@@ -242,17 +243,37 @@
     "enabled": true,
     "volume": 0.9,
     "rate": 1,
-    "engine": "minimax",
+    "engine": "fish",
     "voice": "Microsoft Huihui Desktop",
-    "preset": "cuteGirl",
+    "preset": "storyteller",
     "minimaxVoice": "cute_girl",
     "minimaxModel": "speech-2.8-hd",
     "minimaxEmotion": "happy",
     "minimaxBaseUrl": "",
     "minimaxPitch": 0,
+    "fishModel": "s2.1-pro-free",
+    "fishVoice": "",
+    "fishTemperature": 0.7,
+    "fishStream": true,
+    "fishProxyMode": "system",
+    "fishProxy": "",
     "duck": 1,
     "minimaxApiKey": "",
-    "apiKey": ""
+    "apiKey": "",
+    "fishApiKey": ""
+  },
+  "radio": {
+    "topicMin": 10,
+    "newcomerMinMin": 5,
+    "newcomerMaxMin": 8,
+    "idleSec": 45,
+    "idleWhenEmpty": false,
+    "search": true,
+    "searchPerHour": 30,
+    "paused": false,
+    "blockWords": [],
+    "crisisHotline": "12356",
+    "showFeed": false
   },
   "audio": {
     "autoVolume": false,
