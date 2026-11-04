@@ -18,7 +18,7 @@
 
 <nav class="tabs" id="tabs">
   <button class="tab active" data-pane="basic">① 基础设置</button>
-  <button class="tab" data-pane="story">② 故事电台</button>
+  <button class="tab" data-pane="story">② 小说朗读</button>
   <button class="tab" data-pane="board">③ 数据看板</button>
 </nav>
 
@@ -76,6 +76,15 @@
         <button id="dmConnect" class="primary">连接</button>
         <button id="dmDisconnect">断开</button>
       </div>
+      <div class="row">
+        <label>抖音 Cookie</label>
+        <input id="dmCookie" placeholder="可选：登录后从浏览器复制整行 Cookie，才会收到礼物推送" style="flex:1" autocomplete="off" />
+        <button id="dmCookieSave">保存</button>
+        <button id="dmCookieClear">清除</button>
+      </div>
+      <p class="hint">
+        不进 Cookie 也能抓弹幕、进场、关注、点赞；但<b>礼物消息抖音只推给登录态的观众</b>，想要礼物就在浏览器登录抖音，把 Cookie 整行粘进来（只存在本机 config.json，不会发到别处）。
+      </p>
       <div class="result" id="dmResult">还没连接</div>
     </section>
 
@@ -100,6 +109,13 @@
         <label>自建源</label>
         <input id="muApiBase" placeholder="http://127.0.0.1:3000（NeteaseCloudMusicApi）" style="flex:1" />
       </div>
+      <div class="row">
+        <label>会员登录</label>
+        <input id="muCookie" placeholder="粘贴 MUSIC_U=...（浏览器登录 music.163.com 后从 Cookie 里复制）" style="flex:1" />
+        <button id="muCookieSave" class="primary">保存</button>
+        <button id="muCookieTest">检查</button>
+      </div>
+      <div class="hint" id="muMember">未绑定会员 · 免费歌直接放，会员歌会退回翻唱或记下歌名</div>
       <div class="row slider-row">
         <label>音乐音量</label>
         <input id="muVolume" type="range" min="0" max="1" step="0.01" value="0.75" />
@@ -110,7 +126,12 @@
         <button id="muPreviewBtn" class="primary">▶ 试听当前这首歌</button>
         <button id="muPreviewStop">■ 停止</button>
         <button id="muBeep" title="放一声提示音，用来确认浏览器/系统到底出不出声">🔔 测试音</button>
+        <button id="muSysVol" title="直播窗里有进度条却没声音时用：把 Windows 默认播放设备调到 60%">🔊 修系统音量</button>
         <span class="hint" id="muPreviewState" style="flex:1;min-width:0">还没播</span>
+      </div>
+      <div class="row">
+        <label>系统音量</label>
+        <label class="switch"><input type="checkbox" id="muAutoVol" /> 每次开始放歌/念新一章时，自动把系统音量抬到 60%</label>
       </div>
       <div class="row">
         <label>搜索测试</label>
@@ -140,6 +161,8 @@
         <label style="min-width:auto">音色</label>
         <select id="voEngine" style="width:230px">
           <optgroup label="在线音色（快，需要联网）">
+            <option value="minimax:cuteGirl">MiniMax · 软萌少女</option>
+            <option value="minimax:lyrical">MiniMax · 中文抒情旁白</option>
             <option value="edge:natural">自然 · 晓晓</option>
             <option value="edge:warm">温柔 · 晓晓</option>
             <option value="edge:leng">御姐 · 冷</option>
@@ -164,6 +187,13 @@
           <option value="1.3">很快</option>
         </select>
       </div>
+      <div class="row">
+        <label for="voMinimaxKey">MiniMax Key</label>
+        <input id="voMinimaxKey" type="password" placeholder="粘贴 MiniMax API Key" autocomplete="new-password" />
+        <button id="saveMinimaxKey" class="primary">保存 Key</button>
+        <span class="hint" id="voMinimaxKeyState" role="status">未配置</span>
+      </div>
+      <p class="hint">Key 只用于本机 MiniMax 合成；保存后不会在页面回显。若设置了 <code>MINIMAX_API_KEY</code> 环境变量，它优先于这里保存的 Key。</p>
       <div class="row">
         <label>音色细节</label>
         <span class="hint" id="voName" style="flex:1;min-width:0"></span>
@@ -194,58 +224,76 @@
         <button id="sendSay">发送</button>
       </div>
     </section>
-  </div>
 
-  <!-- ================= ② 故事电台 ================= -->
-  <div class="pane" id="pane-story">
     <section class="panel">
-      <h2>故事电台 · 这一场</h2>
+      <h2>重置直播间</h2>
       <p class="hint">
-        一场 60 分钟：开场 10 分钟 → 5 轮「讲 6 分钟 + 互动 4 分钟」。开场、每段、默认后续、观众可选方向都在这里改；保存会从这一场开头重讲。
+        清空直播画面上的所有弹幕、点歌队列（正在播的那首也会停），以及发送箱和待回复队列。
+        小说进度、今日礼物与收益、token 统计都会保留。
       </p>
       <div class="row">
-        <label>标题</label>
-        <input id="stTitle" style="flex:1" />
-        <label>类型</label>
-        <input id="stGenre" style="width:240px" />
+        <button id="resetLive" class="danger">重置直播间</button>
+        <span class="hint" id="resetLiveHint">相当于重新开一场：弹幕清零、队列清空，其余不动。</span>
       </div>
+    </section>
+  </div>
+
+  <!-- ================= ② 小说朗读 ================= -->
+  <div class="pane" id="pane-story">
+    <section class="panel">
+      <h2>小说朗读 · 今天这一本</h2>
+      <p class="hint">
+        每天自动化写作产出的短篇放进 <code>短篇/</code> 就行，引擎按「修改时间最新」挑一本，一章一章念；念完一章休息几分钟（用语音回弹幕、聊剧情但不剧透），整本念完展示作品档案和大家讨论优缺点。
+      </p>
       <div class="row">
-        <label>时间</label>
-        开场 <input id="stOpenerMin" type="number" min="1" max="60" style="width:72px" /> 分
-        讲述 <input id="stStoryMin" type="number" min="1" max="30" style="width:72px" /> 分
-        互动 <input id="stInteractMin" type="number" min="1" max="30" style="width:72px" /> 分
-        整场 <input id="stTotalMin" type="number" min="10" max="180" style="width:72px" /> 分
+        <label>目录</label>
+        <input id="nvDir" style="width:180px" placeholder="短篇" />
+        <label>每章后休息</label>
+        <input id="nvBreakSec" type="number" min="30" max="1800" step="30" style="width:90px" /> 秒
+        <button id="nvSaveCfg" class="primary">保存</button>
+        <label class="inline"><input id="nvEnabled" type="checkbox" /> 启用朗读</label>
+        <label class="inline"><input id="nvAuto" type="checkbox" /> 自动往下</label>
       </div>
 
-      <div class="story-fields">
-        <label>世界观<textarea id="stWorld" rows="3"></textarea></label>
-        <label>主角<textarea id="stHero" rows="3"></textarea></label>
-        <label>主要人物<textarea id="stCast" rows="3"></textarea></label>
-        <label>核心冲突<textarea id="stConflict" rows="3"></textarea></label>
-        <label>还没解开的谜<textarea id="stMystery" rows="3"></textarea></label>
-        <label>最终结局方向<textarea id="stEnding" rows="2"></textarea></label>
-        <label>不能改的设定（一行一条）<textarea id="stImmutable" rows="3"></textarea></label>
-        <label>可被观众改的（一行一条）<textarea id="stChangeable" rows="3"></textarea></label>
+      <div class="row">
+        <label>选一本</label>
+        <select id="nvFile" style="flex:1"></select>
+        <button id="nvRefresh">刷新列表</button>
       </div>
 
-      <label class="field-label">开场（一行一拍，约 10 分钟讲完）</label>
-      <textarea id="stOpener" rows="6" spellcheck="false"></textarea>
-
-      <label class="field-label">五段故事（一场 5 段，每段一拍一行）</label>
-      <div id="stRounds"></div>
-      <div class="row" style="margin-top:8px">
-        <button id="stAddRound">+ 加一段</button>
+      <div class="row">
+        <label>开始时间</label>
+        <input id="nvStartAt" type="time" style="width:120px" />
+        <label class="inline"><input id="nvAutoStart" type="checkbox" /> 到点自动开讲</label>
+        <button id="nvSaveStart" class="primary">保存时间</button>
+        <span class="hint" id="nvStartHint">空着 = 打开就念；设了时间就先陪观众聊天，提前 5 分钟提醒一次</span>
       </div>
 
-      <div class="row" style="margin-top:12px">
-        <button id="storySave" class="primary">保存设定并重讲</button>
-        <button id="storyStart">开始这一场</button>
-        <button id="storyNext" class="primary">讲下一段</button>
-        <button id="storyStop">停下</button>
-        <label class="inline"><input id="storyAuto" type="checkbox" /> 自动往下讲</label>
-        <button id="storyReset">从头再来</button>
+      <div class="row">
+        <button id="nvStart" class="primary">开始念这一本</button>
+        <button id="nvNext">下一章</button>
+        <button id="nvAdvance">这一章念完了</button>
+        <button id="nvStop">停下</button>
+        <button id="nvReset">从头再来</button>
       </div>
-      <div class="result" id="storyResult"></div>
+
+      <div class="result" id="nvState"></div>
+      <div class="result" id="nvResult"></div>
+    </section>
+
+    <section class="panel">
+      <h2>观众选题（明天的故事）</h2>
+      <p class="hint">观众在弹幕里发「选题 XXX / 投票 XXX」就会记在这里，票多的排前面；第二天写故事时可以直接参考。</p>
+      <div class="row">
+        <input id="nvTopic" placeholder="手动加一个选题" style="flex:1" />
+        <button id="nvTopicAdd">加入</button>
+      </div>
+      <ol id="nvTopics" class="topic-list"></ol>
+    </section>
+
+    <section class="panel">
+      <h2>作品档案（整本念完后生成）</h2>
+      <div id="nvArchive" class="archive-box">还没读完。</div>
     </section>
   </div>
 
@@ -288,25 +336,6 @@
   </div>
 </main>
 
-<template id="roundTpl">
-  <div class="round-card">
-    <div class="row">
-      <label>第 <span data-n>1</span> 段</label>
-      <input data-f="chapter" style="flex:1" placeholder="第一章 · 涨潮后的门铃" />
-      <button data-act="del" class="danger">删掉这段</button>
-    </div>
-    <textarea data-f="beats" rows="4" spellcheck="false" placeholder="一拍一行"></textarea>
-    <div class="row">
-      <label>默认后续</label>
-      <input data-f="defaultNext" style="flex:1" placeholder="没人提建议时，顺着这条往下走" />
-    </div>
-    <div class="row">
-      <label>给观众的方向</label>
-      <input data-f="choices" style="flex:1" placeholder="2–3 条，用 | 隔开" />
-    </div>
-  </div>
-</template>
-
-<script src="/admin.js"></script>
+<script src="/admin.js?v=20261103-1"></script>
 </body>
 </html>

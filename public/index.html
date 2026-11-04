@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>大肥鱼 · 写故事直播间</title>
+    <title>大肥鱼 · 读小说直播间</title>
     <link rel="stylesheet" href="app.css" />
   </head>
   <body>
@@ -61,6 +61,7 @@
           <div class="queue-hint">弹幕里发「点歌 歌名」就能排队</div>
           <audio id="player" preload="none"></audio>
           <audio id="voicePlayer" preload="auto"></audio>
+          <audio id="storyAudio" preload="auto"></audio>
         </section>
 
         <!-- 左侧：弹幕 -->
@@ -73,19 +74,32 @@
             <span class="clock" id="clock">59:00</span>
           </div>
           <div class="danmaku" id="feed">
-            <div class="danmaku-empty" id="danmakuEmpty">弹幕会从这儿滚过去</div>
+            <div class="danmaku-empty" id="danmakuEmpty">
+              <b>弹幕会从这儿滚过去</b>
+              <span>发「点歌 歌名」点歌 · 发「选题 xxx」给明天的小说投票</span>
+            </div>
+          </div>
+          <div class="toc-wrap" id="tocWrap">
+            <div class="toc-head"><span class="card-kicker">本视频目录</span><span class="toc-n" id="tocN"></span></div>
+            <ol class="toc" id="toc"></ol>
+            <div class="toc-topics" id="tocTopics" hidden>
+              <div class="toc-head"><span class="card-kicker">明天读什么</span><span class="toc-n">观众投票</span></div>
+              <ol class="topic-list" id="topicList"></ol>
+            </div>
           </div>
         </div>
 
         <!-- 中间：故事 -->
         <section class="story">
           <header class="story-head">
-            <div class="kicker">今晚的故事</div>
+            <div class="kicker">今晚读的小说</div>
             <h1 id="storyTitle">鲸鱼邮局的第七封信</h1>
             <div class="story-meta">
               <span id="storyChapter">准备开讲</span>
               <span class="sep">·</span>
               <span id="storyBeat">第 0 拍</span>
+              <span class="sep" id="storyStartSep">·</span>
+              <span id="storyStart">每晚 17:00 开讲</span>
               <div class="progress"><i id="storyBar"></i></div>
               <span class="spacer"></span>
               <span class="live-dot"></span>
@@ -101,13 +115,27 @@
           </div>
         </section>
 
-        <!-- 中下：本段总结 -->
-        <section class="summary-card" id="summaryCard">
+        <!-- 中下：本章线索卡（休息时才露出来） -->
+        <section class="summary-card" id="summaryCard" hidden>
           <div class="summary-head">
-            <span class="card-kicker">本段总结</span>
+            <span class="card-kicker">本章线索</span>
             <span class="summary-chapter" id="summaryChapter"></span>
           </div>
-          <p class="summary-text" id="summaryText">这一段讲完，本鲸会把发生的事、拿到什么线索、留下什么悬念，缩成三两句放这儿。</p>
+          <p class="summary-text" id="summaryText"></p>
+          <div class="clue-grid" id="clueGrid" hidden>
+            <div class="clue-col">
+              <b>人物动向</b>
+              <span id="cluePeople"></span>
+            </div>
+            <div class="clue-col">
+              <b>新线索</b>
+              <span id="clueClues"></span>
+            </div>
+            <div class="clue-col">
+              <b>未解谜团</b>
+              <span id="cluePuzzles"></span>
+            </div>
+          </div>
         </section>
 
         <!-- 右下：大肥鱼的活动范围 -->
@@ -116,6 +144,7 @@
           <video class="pet" id="pet" src="assets/pet/idle.webm" autoplay loop muted playsinline></video>
           <div class="soft-fallback" id="softFallback" hidden>🐋</div>
           <div class="nameplate">大肥鱼 · 蓝毛小鲸鱼女仆</div>
+          <div class="voice-hint" id="voiceHint" hidden></div>
           <div class="toast" id="toast"></div>
         </div>
       </div>

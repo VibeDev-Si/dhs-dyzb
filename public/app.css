@@ -388,7 +388,7 @@ body.bare {
   padding: 8px 2px 10px 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-end;   /* 新弹幕从底部往上堆，跟直播间一样 */
   gap: 5px;
   scrollbar-width: thin;
   mask-image: linear-gradient(180deg, transparent 0, #000 26px);
@@ -402,9 +402,22 @@ body.bare {
 }
 
 .danmaku-empty {
-  font-size: var(--fs-body);
+  margin: auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: calc(var(--fs-body) * 0.92);
   color: var(--ink-dim);
-  padding: 10px 2px;
+  padding: 14px 4px;
+  line-height: 1.6;
+}
+.danmaku-empty b {
+  font-weight: 600;
+  color: rgba(230, 244, 255, 0.82);
+}
+.danmaku-empty span {
+  font-size: calc(var(--fs-body) * 0.84);
+  opacity: 0.78;
 }
 
 .msg {
@@ -577,6 +590,28 @@ body.bare {
 .bubble-placeholder {
   color: var(--ink-dim);
 }
+.bubble.story-info {
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+}
+.bubble.story-info .info-h {
+  color: #cfe6ff;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 18px 0 8px;
+  font-size: calc(var(--fs-story) * 0.92);
+}
+.bubble.story-info .info-h.lv1 {
+  color: #eaf4ff;
+  font-size: calc(var(--fs-story) * 1.02);
+}
+.bubble.story-info .info-h:first-child { margin-top: 0; }
+.bubble.story-info .info-p {
+  margin: 0 0 10px;
+  line-height: 1.9;
+}
+.bubble.story-info .info-p b { color: #e8f2ff; font-weight: 600; }
+.bubble.story-info .info-gap { height: 6px; }
 
 /* ---------- 中下：本段总结 ---------- */
 .summary-card {
@@ -606,6 +641,37 @@ body.bare {
   color: var(--ink-soft);
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 线索卡三列：人物动向 / 新线索 / 未解谜团 */
+.clue-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(8px, 0.9vw, 16px);
+  margin-top: 6px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(160, 210, 255, 0.16);
+}
+.clue-col {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.clue-col b {
+  font-size: calc(var(--fs-kicker) * 0.92);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: rgba(150, 210, 255, 0.92);
+}
+.clue-col span {
+  font-size: calc(var(--fs-body) * 0.88);
+  line-height: 1.48;
+  color: var(--ink-soft);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -915,9 +981,180 @@ body.bare .gift-foot {
       "token gift"
       "dm queue"
       "dm story"
-      "dm summary";
+      "toc summary";
   }
   .pet-zone {
     display: none;
   }
+}
+
+/* 正文比纸面长时，底部做一点渐隐，提示「还在往下念」 */
+.paper .bubble {
+  mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
+
+/* ---------- 念小说：语音回复气泡 + 作品档案 ---------- */
+.voice-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 21%;
+  transform: translateX(-50%);
+  max-width: 84%;
+  padding: 7px 14px;
+  border-radius: 14px;
+  font-size: calc(var(--fs-body) * 0.92);
+  color: #eaf6ff;
+  background: rgba(12, 32, 60, 0.78);
+  border: 1px solid rgba(140, 200, 255, 0.32);
+  box-shadow: 0 8px 22px rgba(0, 12, 30, 0.35);
+  backdrop-filter: blur(10px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  animation: hint-in 0.28s ease-out;
+}
+@keyframes hint-in {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* 左栏底部：这一本的目录（跟弹幕同一张卡，用一条细线隔开） */
+.toc-wrap {
+  flex: 0 0 auto;
+  max-height: 30vh;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 0 11px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+.toc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.toc-n {
+  font-size: calc(var(--fs-body) * 0.78);
+  color: var(--ink-dim);
+}
+.toc {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.toc li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: calc(var(--fs-body) * 0.86);
+  color: var(--ink-dim);
+  line-height: 1.5;
+  padding: 1px 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.toc li .toc-idx {
+  flex: 0 0 auto;
+  width: 1.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.toc li .toc-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toc li.done {
+  color: rgba(226, 240, 255, 0.5);
+}
+.toc li.done .toc-title {
+  text-decoration: line-through;
+  text-decoration-color: rgba(160, 210, 255, 0.4);
+}
+.toc li.current {
+  color: #eef8ff;
+}
+.toc li.current .toc-idx::after {
+  content: '';
+}
+.toc li.current::before {
+  content: '';
+  position: absolute;
+}
+.toc li.current .toc-title {
+  font-weight: 600;
+}
+.toc li.current .toc-idx {
+  opacity: 1;
+  color: #7ec8ff;
+}
+.toc-topics {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.topic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.topic-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: calc(var(--fs-body) * 0.84);
+  color: var(--ink-dim);
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.topic-list b {
+  flex: 0 0 auto;
+  color: #ffd479;
+  font-weight: 600;
+  font-size: calc(var(--fs-body) * 0.78);
+}
+.topic-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archive {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 4px 8px;
+}
+.archive-h {
+  font-size: calc(var(--fs-body) * 0.92);
+  letter-spacing: 0.08em;
+  color: rgba(150, 210, 255, 0.9);
+  margin-top: 8px;
+}
+.archive-h:first-child {
+  margin-top: 0;
+}
+.archive-p {
+  margin: 0;
+  font-size: calc(var(--fs-story) * 0.78);
+  line-height: 1.62;
+  color: #eaf5ff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+}
+
+/* hidden 属性优先（卡片用了 display:flex，会盖掉默认 hidden） */
+[hidden] {
+  display: none !important;
 }

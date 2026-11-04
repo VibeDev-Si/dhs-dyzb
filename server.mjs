@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { createReadStream, existsSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
@@ -10,31 +11,54 @@ import { beijing, isPeak, ratesFor, costOf } from './lib/pricing.mjs';
 import { chatCompletion, fetchBalance } from './lib/ai.mjs';
 import { buildMessages, commandReply } from './lib/persona.mjs';
 import { DanmakuBridge } from './lib/cortico.mjs';
-import { resolveTrack, listLocal, findById, trackPath, musicDir, search as musicSearch, clearCache as clearMusicCache } from './lib/music.mjs';
-import { synthesize, listVoices, voiceMediaPath, EDGE_PRESETS, KOKORO_PRESETS } from './lib/voice.mjs';
+import { resolveTrack, listLocal, findById, trackPath, musicDir, search as musicSearch, clearCache as clearMusicCache, neteaseMember, neteaseCookieOf, takeResolveReason } from './lib/music.mjs';
+import { synthesize, listVoices, voiceMediaPath, EDGE_PRESETS, KOKORO_PRESETS, MINIMAX_PRESETS } from './lib/voice.mjs';
 import {
-  initStory,
-  saveStory,
-  storyView,
-  nextDue,
-  itemAt,
-  markItem,
-  startSession,
-  stopSession,
-  resetStory,
-  addSuggestion,
-  parseRadioReply,
-  fallbackSummary,
-  buildRadioMessages,
-  fallbackSay,
-} from './lib/story.mjs';
+  initNovel,
+  saveNovel,
+  novelView as storyView,
+  startNovel,
+  currentChapter,
+  chaptersOf,
+  novelInfo,
+  chapterCount,
+  endChapter,
+  beginReading,
+  nextChapter,
+  resetNovel as resetStory,
+  nextStartMs,
+  markReminded,
+  setAudio,
+  setSummary,
+  setCard,
+  buildCardMessages,
+  parseCard,
+  fallbackCard,
+  castNames,
+  setArchive,
+  addTopic,
+  topTopics,
+  getNovel,
+  listNovels,
+  loadNovelFile,
+  novelDir,
+  stopNovel,
+  buildBreakMessages,
+  buildArchiveMessages,
+  parseArchive,
+  fallbackArchive,
+  spokenTitle,
+  speechOf,
+  setAudioMs,
+  setDisplayMode,
+} from './lib/novel.mjs';
 
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const PORT = Number(process.env.PORT || 8787);
 
 await loadConfig();
 await initStore();
-await initStory();
+await initNovel(getConfig());
 const cfg0 = getConfig();
 const PORT_FINAL = Number(process.env.PORT || cfg0.port || 8787);
 
@@ -126,7 +150,12 @@ function statsView() {
 
 function songView() {
   const s = getState();
-  return { currentSong: s.currentSong, playlist: s.playlist, music: musicView() };
+  return {
+    currentSong: s.currentSong,
+    playlist: s.playlist,
+    queueMax: Number(getConfig().music?.queueMax ?? 3),
+    music: musicView(),
+  };
 }
 
 function musicView() {
@@ -136,26 +165,52 @@ function musicView() {
     provider: cfg.music?.provider || 'auto',
     dir: cfg.music?.dir || 'music',
     apiBase: cfg.music?.apiBase || '',
-    volume: cfg.music?.volume ?? 0.75,
+    volume: cfg.music?.volume ?? 0.2,
+    queueMax: cfg.music?.queueMax ?? 3,
+    hasCookie: Boolean(neteaseCookieOf(cfg)),
+    member: memberCache,
     tracks: tracks.map((t) => ({ id: t.id, title: t.title, by: t.by, size: t.size, file: t.file })),
     count: tracks.length,
   };
+}
+
+/* 网易云会员登录态：60 秒缓存，避免每次刷新页面都去打接口 */
+let memberCache = null;
+let memberAt = 0;
+async function refreshMember({ force = false } = {}) {
+  const cfg = getConfig();
+  if (!neteaseCookieOf(cfg)) {
+    memberCache = { loggedIn: false, hasCookie: false };
+    memberAt = Date.now();
+    return memberCache;
+  }
+  if (!force && memberCache && Date.now() - memberAt < 60_000) return memberCache;
+  memberCache = await neteaseMember(cfg);
+  memberAt = Date.now();
+  return memberCache;
 }
 
 /** 把当前这首歌解析成可播放地址（点歌、切歌、页面初次加载都会走） */
 let resolvingSong = null;
 let voiceError = null;
 
-/** 合成用的参数：系统语音看 voice/rate，御姐音看 preset */
-function voiceOptsOf(cfg) {
+/** 合成用的参数：各引擎共用 rate/preset，MiniMax 额外读取专属配置 */
+function voiceOptsOf(cfg, extra = {}) {
   const v = cfg.voice || {};
-  const engine = ['edge', 'kokoro'].includes(v.engine) ? v.engine : 'sapi';
+  const engine = ['edge', 'kokoro', 'minimax'].includes(v.engine) ? v.engine : 'sapi';
   return {
     engine,
     rate: v.rate ?? 1,
     voice: v.voice || undefined,
-    preset: v.preset || (engine === 'kokoro' ? 'xiaobei' : 'natural'),
+    preset: v.preset || (engine === 'kokoro' ? 'xiaobei' : engine === 'minimax' ? 'lyrical' : 'natural'),
     speed: v.speed ?? undefined,
+    minimaxVoice: v.minimaxVoice || undefined,
+    minimaxModel: v.minimaxModel || undefined,
+    minimaxEmotion: v.minimaxEmotion || undefined,
+    minimaxBaseUrl: v.minimaxBaseUrl || undefined,
+    minimaxPitch: v.minimaxPitch ?? 0,
+    minimaxApiKey: v.minimaxApiKey || undefined,
+    ...extra,
   };
 }
 async function resolveCurrent({ force = false } = {}) {
@@ -186,6 +241,7 @@ async function resolveCurrent({ force = false } = {}) {
       : { ...cur, url: '', kind: 'none', provider: '', lastError: '没有可用播放源', resolvedAt: Date.now() };
     setCurrentSong(merged);
     broadcast({ type: 'song', ...songView() });
+    if (merged.url) ensureSystemVolume().catch(() => {});
     return merged;
   })().finally(() => {
     resolvingSong = null;
@@ -353,16 +409,44 @@ async function aiComplete(cfg, messages, opts = {}) {
   throw lastErr || new Error('没有可用的 AI 接口（Key 是空的）');
 }
 
+// 休息/讨论阶段用语音回复，不占聊天框；朗读阶段照常回在聊天框里
+function replyPhase() {
+  const p = getNovel()?.phase || 'idle';
+  /* 只要不是在念正文（含准备中），都用语音回观众 */
+  return p === 'reading' || p === 'preparing' ? 'chat' : 'voice';
+}
+
+async function speakReply(text) {
+  const cfg = getConfig();
+  try {
+    const out = await synthesize(text, voiceOptsOf(cfg, { maxChars: 1500 }));
+    return out.url || '';
+  } catch (err) {
+    console.warn('[voice] 弹幕回复合成失败：', err.message);
+    return '';
+  }
+}
+
 async function doReply(job) {
   const cfg = getConfig();
   const s = getState();
+  const mode = replyPhase();
+
+  const deliver = async (text, extra = {}) => {
+    if (!text) return;
+    lastReplyText = text;
+    if (mode === 'voice') {
+      const url = await speakReply(text);
+      pushEvent(addAiEvent({ text, source: extra.source || 'ai', voiceOnly: true, voice: url }));
+      return;
+    }
+    pushEvent(addAiEvent({ text, source: extra.source || 'ai' }));
+    enqueueReply(text);
+  };
 
   if (job.kind === 'command') {
     const text = job.text || commandReply(job.command, job.payload || {});
-    if (!text) return;
-    lastReplyText = text;
-    pushEvent(addAiEvent({ text, source: 'command' }));
-    enqueueReply(text);
+    await deliver(text, { source: 'command' });
     return;
   }
 
@@ -379,46 +463,92 @@ async function doReply(job) {
       const pool = FALLBACK_REPLIES.filter((t) => t !== lastAi);
       text = pool[Math.floor(Math.random() * pool.length)] || text;
     }
-    lastReplyText = text;
-    pushEvent(addAiEvent({ text, source: 'fallback' }));
-    enqueueReply(text);
+    await deliver(text, { source: 'fallback' });
     return;
   }
 
-  const radio = cfg.story?.enabled;
-  const messages = radio
-    ? buildRadioMessages(cfg, s, { type: 'reply', gift: job.gift || null, user: job.username, text: question })
+  const nv = getNovel();
+  const phase = nv?.phase || 'idle';
+  const discuss = phase === 'break' || phase === 'afterword';
+  const messages = discuss
+    ? buildBreakMessages(cfg, {
+        username: job.username,
+        text: question,
+        gift: job.gift ? job.gift.name : '',
+        chapterTitle: currentChapter()?.title || '',
+        summary: nv?.summaries?.[nv.idx] || '',
+        pastSummaries: (nv?.summaries || []).filter(Boolean),
+        topics: topTopics(5),
+      })
     : buildMessages(cfg, s, {
         username: job.username,
         text: job.gift ? `送出了${job.gift.name}×${job.gift.count}` : question,
         recent: s.events.filter((e) => e.kind === 'chat' || e.kind === 'ai').slice(-8),
       });
+
+  /* 还没到开讲时间：陪聊，但别把今晚的剧情说漏 */
+  if (!discuss) {
+    const pre = idleHint(cfg);
+    if (pre) messages.push({ role: 'system', content: pre });
+  }
+
+  /* 让回复知道现在念到哪一章（模型不知道就会编成「第二十三章」） */
+  if (phase === 'reading' || phase === 'preparing') {
+    const c = currentChapter();
+    const nv2 = getNovel();
+    if (c) {
+      messages.push({
+        role: 'system',
+        content: `现在正在念《${nv2?.title || ''}》的第 ${(nv2?.idx ?? 0) + 1} 章「${c.title || ''}」（共 ${chaptersOf()?.length || 1} 章）。聊到进度就按这个说，不要编章号，也不要提前讲后面的情节。`,
+      });
+    }
+  }
+
   const started = Date.now();
   const raw = await aiComplete(cfg, messages, {
     temperature: cfg.ai.temperature,
-    maxTokens: radio ? 320 : cfg.ai.maxTokens,
+    maxTokens: mode === 'voice' ? 260 : cfg.ai.maxTokens,
   });
-  const text = radio ? parseRadioReply(raw.text).say : raw.text;
+  const text = String(raw.text || '')
+    .replace(/^["“「]|["”」]$/g, '')
+    .replace(/\s*\n+\s*/g, ' ')
+    .trim();
   if (!text) return;
   const usage = raw.usage;
   const cost = costOf(usage, ratesFor(cfg.pricing, raw.usedModel || cfg.ai.model));
   const ev = addAiUsage({ usage, cost, replyText: text });
   ev.ms = Date.now() - started;
-  lastReplyText = text;
   console.log(
     `[ai] ${job.username} → ${text.slice(0, 30)}… in=${usage?.prompt_tokens ?? 0} out=${usage?.completion_tokens ?? 0} ¥${cost}`,
   );
+  if (mode === 'voice') {
+    // 语音回复：不进聊天框，也不推给扩展
+    const url = await speakReply(text);
+    ev.voiceOnly = true;
+    ev.voice = url;
+    pushEvent(ev);
+    return;
+  }
   pushEvent(ev);
   enqueueReply(text);
 }
 
 // ---------- 指令解析 ----------
-function parseIdeaCommand(text) {
+// 观众提选题：给明天的故事投票（休息和讨论时都能提）
+function parseTopicCommand(text) {
   const t = String(text || '').trim();
-  const m = t.match(/^期待后续[\s:：]*(.+)$/u);
+  const m = t.match(/^(?:选题|投票|提选题|建议选题|我想看|想听)[\s:：]*(.+)$/u);
   if (!m) return null;
-  const idea = m[1].trim().slice(0, 60);
+  const idea = m[1].trim().slice(0, 80);
   return idea || null;
+}
+
+function parseStoryDisplayCommand(text) {
+  const t = String(text || '').trim().replace(/[。！？!?~～\s]+$/u, '');
+  if (/^查看角色$/u.test(t)) return 'characters';
+  if (/^查看设定$/u.test(t)) return 'settings';
+  if (/^(?:查看故事|返回故事|继续故事)$/u.test(t)) return 'story';
+  return null;
 }
 
 function parseSongCommand(text) {
@@ -476,18 +606,37 @@ function handleIncoming(body) {
   if (kind === 'chat' && !text) return { ok: false, error: '弹幕内容为空' };
 
   const item = { kind, username: username || '神秘观众', text, gift, source: body.source || 'extension' };
-  if (isDuplicate(item)) return { ok: true, duplicate: true };
+  /* 礼物不做 4 秒去重：同一人连送两次同名小礼物是正常行为（重复上报由 giftId 兜底在桥里处理） */
+  if (kind !== 'gift' && isDuplicate(item)) return { ok: true, duplicate: true };
+  if (kind === 'gift') console.log(`[gift] ${item.username} 送出 ${gift.name} ×${gift.count}（¥${gift.price}）source=${item.source}`);
 
   const ev = recordEvent({ ...item, ts: body.ts });
   pushEvent(ev);
 
   if (ev.kind === 'chat') {
-    const idea = parseIdeaCommand(ev.text);
+    const displayMode = parseStoryDisplayCommand(ev.text);
+    const topic = parseTopicCommand(ev.text);
     const title = parseSongCommand(ev.text);
+    if (displayMode) {
+      if (getNovel()?.file) {
+        setDisplayMode(displayMode);
+        broadcastNovel('type');
+      }
+      return { ok: true, item: eventView(ev), displayMode };
+    }
     if (title) {
-      const song = pushPlaylist(title, ev.username);
+      const queueMax = Number(getConfig().music?.queueMax ?? 3);
+      const song = pushPlaylist(title, ev.username, queueMax);
       broadcast({ type: 'song', ...songView() });
-      if (song.dup) {
+      ensureSystemVolume().catch(() => {});
+      if (song.full) {
+        const cur = getState().currentSong?.title;
+        scheduleReply({
+          kind: 'command',
+          username: ev.username,
+          text: `队列已经排了 ${queueMax} 首啦${cur ? `，等《${cur}》放完再点吧` : '，等前面放完再点吧'}，本鲸记不下更多了。`,
+        });
+      } else if (song.dup) {
         scheduleReply({
           kind: 'command',
           username: ev.username,
@@ -499,24 +648,30 @@ function handleIncoming(body) {
           const cfgNow = getConfig();
           const target = await resolveTrack(cfgNow, song.title, { title: song.title }).catch(() => null);
           if (!target?.url) {
-            scheduleReply({
-              kind: 'command',
-              username: ev.username,
-              text: `收到你的点歌：《${song.title}》，已经加入点歌队列。这首歌暂时没有可用播放源，本鲸先记下歌名，稍后再帮你确认。`,
-            });
+            const miss = takeResolveReason();
+            const why =
+              miss.reason === 'vip'
+                ? `这首《${miss.title || song.title}》要网易云会员才能放，本鲸现在没登录会员，先记下歌名，等登录了再点一次。`
+                : miss.reason === 'vip-expired'
+                  ? `这首《${miss.title || song.title}》本鲸这边会员取不到地址，可能是会员过期或者登录失效了，先记下歌名。`
+                  : `收到你的点歌：《${song.title}》，已经加入点歌队列。这首歌暂时没有可用播放源，本鲸先记下歌名，稍后再帮你确认。`;
+            scheduleReply({ kind: 'command', username: ev.username, text: why });
             return;
           }
           if (song.playing) await resolveCurrent();
           scheduleReply({ kind: 'command', username: ev.username, text: songReplyText(song.title, true) });
         })();
       }
-    } else if (idea) {
-      addSuggestion({ user: ev.username, text: idea });
-      broadcast({ type: 'story', story: storyView(getConfig()) });
+    } else if (topic) {
+      const item = addTopic(topic, ev.username);
+      broadcastNovel();
+      const rank = topTopics(12).findIndex((t) => t.text === item?.text);
       scheduleReply({
         kind: 'command',
         username: ev.username,
-        text: '收到你的后续想法，我会把它和其他观众的建议一起分析。',
+        text:
+          `收到你的选题：《${item?.text || topic}》，本鲸记进明天的候选里了` +
+          (rank >= 0 ? `，现在排第 ${rank + 1} 位。` : '。'),
       });
     } else if (CUT_RE.test(ev.text)) {
       (async () => {
@@ -544,7 +699,12 @@ const bridge = new DanmakuBridge();
 function danmakuView() {
   const cfg = getConfig();
   const s = bridge.status();
-  return { ...s, mode: cfg.danmaku?.mode || 'auto', savedRoomId: cfg.danmaku?.roomId || cfg.roomId || '' };
+  return {
+    ...s,
+    mode: cfg.danmaku?.mode || 'auto',
+    savedRoomId: cfg.danmaku?.roomId || cfg.roomId || '',
+    hasCookie: Boolean(cfg.danmaku?.cookie),
+  };
 }
 
 bridge.on('event', (ev) => {
@@ -572,7 +732,7 @@ async function startDanmaku(roomId) {
   if (!rid) throw new Error('先填直播间号');
   updateConfig({ roomId: rid, danmaku: { ...(getConfig().danmaku || {}), roomId: rid } });
   await saveConfig();
-  await bridge.start(rid);
+  await bridge.start(rid, { cookie: getConfig().danmaku?.cookie || '' });
   broadcast({ type: 'danmaku', danmaku: danmakuView() });
   broadcast({ type: 'config', config: publicConfig() });
   console.log(`  📡 弹幕直连 -> ${rid} (${bridge.state})`);
@@ -616,120 +776,394 @@ function startDemo() {
   }, 9000);
 }
 
-// ---------- 讲故事（60 分钟电台） ----------
-let storyBusy = false;
-let storyTimer = null;
+// ---------- 念小说（章节驱动，不用固定排期） ----------
+let novelBusy = false;
+let novelRetry = 0;
+let novelTimer = null;
 
-function nextWaitMs(cfg) {
-  const v = storyView(cfg);
-  if (!v.running) return 1200;
-  if (!v.next) return 25 * 60_000;
-  return Math.max(900, v.next.inSec * 1000 + 1500);
-}
+/* ---------- 系统音量自检 ----------
+ * 这台机器的 USB 声卡闲下来会把主音量重置到很低（实测见过 0.02 / 0.06），
+ * 页面里怎么调都没用 —— 所以每次开始放歌/念书时，顺手确认一下系统音量，
+ * 低于 0.35 就用音量键抬到 0.6。只抬不降；三分钟内最多跑一次。 */
+let sysVolAt = 0;
+let sysVolBusy = false;
+let sysVolLast = '';
 
-function scheduleStory(delay) {
-  clearTimeout(storyTimer);
-  storyTimer = null;
+function ensureSystemVolume({ force = false } = {}) {
+  if (process.platform !== 'win32') return Promise.resolve(null);
   const cfg = getConfig();
-  if (!cfg.story?.enabled || !cfg.story?.auto || storyBusy) return;
-  const v = storyView(cfg);
-  if (!v.running && v.finished) return; // 这一场已经收束，等手动「开始这一场」
-  storyTimer = setTimeout(() => {
-    storyStep().catch((err) => console.warn('[story]', err.message));
-  }, Math.min(Math.max(5000, delay ?? nextWaitMs(cfg)), 20 * 60_000));
+  /* 默认关：系统音量是使用者自己调的，别自作主张改它 —— 要在操作台勾上才自动抬 */
+  if (!force && !cfg.audio?.autoVolume) return Promise.resolve(null);
+  const now = Date.now();
+  if (!force && (sysVolBusy || now - sysVolAt < 180_000)) return Promise.resolve(null);
+  const target = Math.min(1, Math.max(0.1, Number(cfg.audio?.target ?? 0.6) || 0.6));
+  const script = path.join(ROOT, 'tools', 'audio-loud.ps1');
+  if (!existsSync(script)) return Promise.resolve(null);
+  sysVolAt = now;
+  sysVolBusy = true;
+  return new Promise((resolve) => {
+    execFile(
+      'powershell',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, String(target)],
+      { timeout: 90000, windowsHide: true },
+      (err, stdout) => {
+        sysVolBusy = false;
+        const line = String(stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '';
+        sysVolLast = err ? `失败：${err.message}` : line;
+        if (!err && line) console.log(`[audio] ${line}`);
+        resolve(line || null);
+      },
+    );
+  });
 }
 
-function broadcastStory(story, mood) {
-  broadcast({ type: 'story', story, mood: mood || null });
+function novelDirLabel() {
+  return novelDir(getConfig()).replace(ROOT, '.');
+}
+
+function broadcastNovel(mood) {
+  broadcast({ type: 'story', story: storyView(getConfig()), mood: mood || null });
   broadcast({ type: 'stats', stats: statsView() });
 }
 
-async function storyStep() {
+function scheduleNovel(delay) {
+  clearTimeout(novelTimer);
+  novelTimer = null;
   const cfg = getConfig();
-  if (!cfg.story?.enabled) return { ok: false, error: '故事模式关着' };
-  if (storyBusy) return { ok: false, error: '上一段还在讲' };
+  if (!cfg.novel?.enabled || !cfg.novel?.auto || novelBusy) return;
+  novelTimer = setTimeout(() => {
+    novelStep().catch((err) => console.warn('[novel]', err.message));
+  }, Math.min(Math.max(400, delay ?? 600), 60 * 60_000));
+}
 
-  const v0 = storyView(cfg);
-  if (!v0.running) {
-    if (v0.finished) return { ok: false, error: '这一场已经讲完收束了，点「开始这一场」再讲一次' };
-    startSession();
-  }
+/* ---------------- 定时开讲 ---------------- */
 
-  const item = nextDue(getConfig());
-  if (!item) {
-    const v = storyView(getConfig());
-    if (v.running && !v.next) {
-      stopSession();
-      await saveStory();
-      broadcastStory(storyView(getConfig()));
-      return { ok: true, finished: true, story: storyView(getConfig()) };
+const REMIND_BEFORE_MS = 5 * 60_000;
+
+function fmtHm(ms) {
+  const d = new Date(ms);
+  return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** 今晚这场要念的书（还没开讲时用来预告，不改变任何状态） */
+function upcomingBook(cfg) {
+  const top = listNovels(cfg)[0];
+  if (!top) return null;
+  let chapters = Number(top.chapters) || 0;
+  let title = top.title || '';
+  if (!chapters) {
+    try {
+      const f = loadNovelFile(cfg, top.name);
+      chapters = f?.chapters?.length || 0;
+      title = f?.title || title;
+    } catch {
+      /* 读不到就算了，预告里就不书说几章 */
     }
-    scheduleStory();
-    return { ok: true, waiting: true, story: v };
+  }
+  return { title: title || '今晚这本', chapters };
+}
+
+/** 还没到开讲时间时给模型的一句提示（陪聊、别剧透） */
+function idleHint(cfg) {
+  if (!cfg.novel?.enabled) return '';
+  const nv = getNovel();
+  const phase = nv?.phase || 'idle';
+  if (phase !== 'idle' && phase !== 'done') return '';
+  const at = nextStartMs(cfg);
+  if (!at) return '';
+  const book = upcomingBook(cfg);
+  const desc = book
+    ? `今晚念《${book.title}》${book.chapters ? `，一共 ${book.chapters} 章` : ''}`
+    : '今晚这本还没落到书桌上';
+  return (
+    `现在还没开讲（${fmtHm(at)} 开始，${desc}）。这几分钟就是陪观众聊天：聊日常、聊上一本听了什么、催他们点歌都行。` +
+    `绝对不要提前讲今晚的剧情、不要透露结局，被问到就说「等开讲你就知道了」。`
+  );
+}
+
+/** 开讲前 5 分钟在直播间喊一声（页面 + 语音 + 抖音公屏） */
+async function announceSoon(cfg, at) {
+  const book = upcomingBook(cfg);
+  const text = book
+    ? `还有五分钟，${fmtHm(at)} 准时开讲。今晚念《${book.title}》${book.chapters ? `，一共 ${book.chapters} 章` : ''}。先把灯点上，本鲸喝口水就开。`
+    : `还有五分钟就开讲了，${fmtHm(at)} 准时开始。今晚这本还没落到书桌上，本鲸先去翻一翻。`;
+  let voice = '';
+  try {
+    const out = await synthesize(text, voiceOptsOf(cfg, { maxChars: 400 }));
+    voice = out.url || '';
+  } catch (err) {
+    console.warn('[voice] 开讲提醒合成失败：', err.message);
+  }
+  pushEvent(addAiEvent({ text, source: 'schedule', voice }));
+  enqueueReply(text);
+  broadcastNovel('wave');
+  console.log('[schedule] 已发开讲提醒：', fmtHm(at));
+}
+
+/** 每分钟看一眼：到点提醒 / 到点开讲 */
+async function storyScheduleTick() {
+  const cfg = getConfig();
+  if (!cfg.novel?.enabled) return;
+  /* 没设时间就按默认 17:00（页面也显示这个） */
+  const at = nextStartMs(cfg);
+  if (!at) return;
+  const now = Date.now();
+  const nv = getNovel();
+  const phase = nv?.phase || 'idle';
+  const idle = phase === 'idle' || phase === 'done' || phase === 'afterword';
+  if (!idle) return;
+
+  /* 5 分钟提醒：同一场只喊一次 */
+  if (now >= at - REMIND_BEFORE_MS && now < at && nv?.remindedFor !== at) {
+    markReminded(at);
+    await announceSoon(cfg, at);
+    return;
   }
 
-  storyBusy = true;
-  clearTimeout(storyTimer);
-  storyTimer = null;
+  /* 到点自动开讲：每次都从「目录里最新的一本」开始，不接着昨天那本 */
+  if (cfg.novel.autoStart !== false && now >= at && now < at + 3 * 60_000) {
+    const newest = listNovels(cfg)[0];
+    startNovel(cfg, newest ? { file: newest.name } : {});
+    pushEvent({
+      kind: 'system',
+      username: '系统',
+      text: `到点了（${fmtHm(at)}），开始念书。`,
+    });
+    broadcastNovel('type');
+    scheduleNovel(600);
+    console.log('[schedule] 到点开讲');
+  }
+}
 
-  try {
-    let say = '';
-    let summary = '';
-    let mood = null;
+async function synthChapter(cfg, ch) {
+  const say = `${spokenTitle(ch.title)}。\n${speechOf(ch.text)}`;
+  const out = await synthesize(say, voiceOptsOf(cfg, { maxChars: 40000 }));
+  return out.url || '';
+}
 
-    if (cfg.ai.enabled && cfg.ai.apiKey) {
-      const started = Date.now();
+/** 看门狗用的时长估算：edge 御姐音大约每秒 4 个字 */
+function estChapterMs(text) {
+  return Math.round((String(text || '').length / 4) * 1000 * 1.25) + 20000;
+}
+
+/** 这一章还要多久（音频在播时按真实时长算，否则按字数估），再加 45 秒缓冲 */
+function watchdogDelay() {
+  const nv = getNovel() || {};
+  const total = Number(nv.audioMs || 0) || estChapterMs(currentChapter()?.text || '');
+  const played = nv.chapterStartedAt ? Date.now() - nv.chapterStartedAt : 0;
+  const left = Math.max(20000, total - played);
+  return left + 45000;
+}
+
+/** 一章读完，写「小结 + 本章线索卡」：人物动向 / 新线索 / 未解谜团 */
+async function summarizeChapter(cfg, ch) {
+  const nv = getNovel();
+  const plain = String(ch.text || '').replace(/\s+/g, ' ').trim();
+  const cast = castNames(novelInfo());
+  let card = null;
+
+  if (cfg.ai.enabled && cfg.ai.apiKey) {
+    try {
+      const res = await aiComplete(cfg, buildCardMessages({ title: ch.title, text: ch.text, cast: cast.join('、') }), {
+        temperature: 0.7,
+        maxTokens: 420,
+        timeoutMs: 60000,
+      });
+      const cost = costOf(res.usage, ratesFor(cfg.pricing, res.usedModel || cfg.ai.model));
+      addUsageOnly({ usage: res.usage, cost });
+      card = parseCard(res.text);
+      if (!card) {
+        /* 模型偶发不吐 JSON，再要一次「只给 JSON」 */
+        const retry = await aiComplete(
+          cfg,
+          [
+            ...buildCardMessages({ title: ch.title, text: ch.text, cast: cast.join('、') }),
+            { role: 'assistant', content: String(res.text || '').slice(0, 600) },
+            { role: 'user', content: '只输出那段 JSON 本身，不要解释、不要 markdown 代码块。' },
+          ],
+          { temperature: 0.3, maxTokens: 360, timeoutMs: 60000 },
+        );
+        const cost2 = costOf(retry.usage, ratesFor(cfg.pricing, retry.usedModel || cfg.ai.model));
+        addUsageOnly({ usage: retry.usage, cost: cost2 });
+        card = parseCard(retry.text);
+      }
+    } catch (err) {
+      console.warn('[novel] 线索卡生成失败（用规则兜底）：', err.message);
+    }
+  }
+  if (!card) card = fallbackCard({ text: ch.text, cast });
+
+  const text = (card.summary || plain.slice(0, 46)).slice(0, 120);
+  setSummary(nv.idx, text);
+  setCard(nv.idx, { ...card, summary: text });
+  return text;
+}
+
+/** 念完一整本之后的作品档案：设定 / 人物 / 优点 / 短板 / 可以问观众的问题 */
+async function makeArchive(cfg) {
+  const info = novelInfo();
+  let obj = null;
+  if (cfg.ai.enabled && cfg.ai.apiKey) {
+    for (let attempt = 1; attempt <= 2 && !obj; attempt++) {
       try {
-        const res = await aiComplete(cfg, buildRadioMessages(cfg, getState(), item), {
-          temperature: Math.max(1.05, Number(cfg.ai.temperature) || 1.1),
-          maxTokens: item.type === 'story' ? 3200 : 700,
-          timeoutMs: item.type === 'story' ? 240000 : 45000,
+        const msgs = buildArchiveMessages({ ...info, summaries: getNovel()?.summaries || [] });
+        if (attempt === 2) {
+          msgs.push({ role: 'user', content: '只输出那段 JSON 本身，不要解释、不要 markdown 代码块。' });
+        }
+        const res = await aiComplete(cfg, msgs, {
+          temperature: attempt === 1 ? 0.9 : 0.6,
+          maxTokens: 900,
+          timeoutMs: 90000,
         });
         const cost = costOf(res.usage, ratesFor(cfg.pricing, res.usedModel || cfg.ai.model));
         addUsageOnly({ usage: res.usage, cost });
-        const parsed = parseRadioReply(res.text);
-        say = parsed.say;
-        summary = parsed.summary;
-        mood = parsed.mood;
-        console.log(
-          `[story] ${item.type}${item.round >= 0 ? ` r${item.round + 1}` : ''}${Number.isInteger(item.beat) ? ` b${item.beat + 1}` : ''} in=${res.usage?.prompt_tokens ?? 0} out=${res.usage?.completion_tokens ?? 0} ¥${cost} ${Date.now() - started}ms`,
-        );
-        aiRetry = 0;
+        obj = parseArchive(res.text);
+        if (!obj) console.warn('[novel] 档案 JSON 没解析出来，重试一次');
       } catch (err) {
-        aiRetry += 1;
-        console.warn(`[story] AI 没接上（第 ${aiRetry} 次）：`, err.message);
-        pushEvent({
-          kind: 'system',
-          username: '系统',
-          text: `故事 AI 暂时没接上：${err.message}`.slice(0, 120),
-        });
-        // 长篇（开场 / 讲述）别拿兜底稿糊过去：等几秒重来同一条，最多两次
-        if (aiRetry <= 2 && (item.type === 'story' || item.type === 'opener')) {
-          pushEvent({
-            kind: 'system',
-            username: '系统',
-            text: `这一段先等 ${5 * aiRetry} 秒，自动重来一次（AI 太忙）。`,
-          });
-          return { ok: false, retrying: true, error: err.message, story: storyView(getConfig()) };
-        }
+        console.warn('[novel] 档案生成失败：', err.message);
       }
     }
-
-    if (!say) say = fallbackSay(cfg, item);
-    if (item.type === 'summary' && !summary) summary = fallbackSummary();
-    markItem(getConfig(), item, { say, summary });
-    const story = storyView(getConfig());
-    await saveStory();
-    broadcastStory(story, mood);
-    return { ok: true, story, item: { type: item.type, round: item.round ?? -1, beat: item.beat ?? -1 } };
-  } catch (err) {
-    console.warn('[story] 讲失败了：', err.message);
-    return { ok: false, error: err.message };
-  } finally {
-    storyBusy = false;
-    const now = getConfig();
-    if (now.story?.enabled && now.story?.auto) scheduleStory();
   }
+  if (!obj) obj = fallbackArchive(info, chaptersOf());
+  setArchive(obj);
+  pushEvent({
+    kind: 'system',
+    username: '系统',
+    text: '整本念完了，作品档案已经整理好，可以和大家聊聊设定、人物和优缺点。',
+  });
+  return obj;
+}
+
+/** 一章结束（音频 ended 或看门狗触发） */
+async function chapterDone(source) {
+  const cfg = getConfig();
+  const v = storyView(cfg);
+  if (v.phase !== 'reading') return { ok: true, ignored: true, phase: v.phase };
+  const ch = currentChapter();
+  // 先切到休息态（此刻起弹幕回复就走语音），再慢慢写小结
+  endChapter(cfg);
+  const min = Math.round(Number(cfg.novel?.breakSec || 300) / 60);
+  pushEvent({
+    kind: 'system',
+    username: '系统',
+    text: `这一章念完了${source === 'audio' ? '' : '（自动）'}，休息 ${min} 分钟，聊聊刚才听到的。`,
+  });
+  broadcastNovel('wave');
+  scheduleNovel((Number(cfg.novel?.breakSec || 300) + 1) * 1000);
+  if (ch) {
+    summarizeChapter(cfg, ch)
+      .then(async () => {
+        broadcastNovel();
+        /* 线索卡也念一遍：听众不看屏幕也知道这章记住了什么 */
+        await speakCard(cfg);
+      })
+      .catch((err) => console.warn('[novel] 小结失败：', err.message));
+  }
+  return { ok: true, phase: 'break', breakSec: Number(cfg.novel?.breakSec || 300) };
+}
+
+/** 把本章线索卡用语音说一遍（休息期只出声，不进弹幕框） */
+async function speakCard(cfg) {
+  const nv = getNovel();
+  const card = (Array.isArray(nv?.cards) && nv.cards[nv.idx]) || null;
+  if (!card) return;
+  const parts = [`这一章先说个大概：${card.summary}。`];
+  if (card.people) parts.push(`人物动向，${card.people}。`);
+  if (card.clues) parts.push(`新线索，${card.clues}。`);
+  if (card.puzzles) parts.push(`还没解开的，${card.puzzles}。`);
+  const text = parts.join('');
+  let voice = '';
+  try {
+    const out = await synthesize(text, voiceOptsOf(cfg, { maxChars: 800 }));
+    voice = out.url || '';
+  } catch (err) {
+    console.warn('[voice] 线索卡朗读失败：', err.message);
+  }
+  pushEvent(addAiEvent({ text, source: 'card', voiceOnly: true, voice }));
+}
+
+async function novelStep() {
+  const cfg = getConfig();
+  if (!cfg.novel?.enabled) return { ok: false, error: '小说模式关着' };
+  if (novelBusy) return { ok: false, error: '上一章还在准备' };
+
+  let v = storyView(cfg);
+
+  // 还没开 / 已经读完：从头开始下一本
+  if (v.phase === 'idle' || v.phase === 'done') {
+    const r = startNovel(cfg, {});
+    if (!r.ok) {
+      pushEvent({ kind: 'system', username: '系统', text: r.error });
+      return r;
+    }
+    pushEvent({ kind: 'system', username: '系统', text: `今晚念《${r.title}》，一共 ${r.chapters} 章。` });
+    broadcastNovel('type');
+    v = storyView(cfg);
+  }
+
+  if (v.phase === 'break') {
+    const left = Number(v.countdown || 0);
+    if (left > 0) {
+      scheduleNovel(left * 1000 + 500);
+      return { ok: true, waiting: true, left };
+    }
+    const r = nextChapter();
+    broadcastNovel('type');
+    if (!r.more) {
+      await makeArchive(cfg);
+      broadcastNovel('wave');
+      return { ok: true, afterword: true };
+    }
+    scheduleNovel(600);
+    return { ok: true, next: r.idx };
+  }
+
+  if (v.phase === 'afterword') {
+    if (!getNovel()?.archive) await makeArchive(cfg);
+    broadcastNovel('wave');
+    return { ok: true, afterword: true };
+  }
+
+  const ch = currentChapter();
+  if (!ch) {
+    pushEvent({ kind: 'system', username: '系统', text: '这一本里没找到可念的章节。' });
+    return { ok: false, error: '没有章节' };
+  }
+
+  // preparing：把整章合成为一段音频
+  if (v.phase === 'preparing' || !v.audioUrl) {
+    novelBusy = true;
+    try {
+      pushEvent({ kind: 'system', username: '系统', text: `正在把「${ch.title}」合成语音（${ch.text.length} 字）…` });
+      const url = await synthChapter(cfg, ch);
+      if (!url) throw new Error('语音没合成出来');
+      setAudio(url, estChapterMs(ch.text));
+      beginReading();
+      ensureSystemVolume().catch(() => {});
+      novelRetry = 0;
+      broadcastNovel('type');
+      pushEvent({ kind: 'system', username: '系统', text: `开始念「${ch.title}」。` });
+      scheduleNovel(watchdogDelay());
+      return { ok: true, reading: true, chapter: ch.title };
+    } catch (err) {
+      console.warn('[novel] 合成失败：', err.message);
+      pushEvent({ kind: 'system', username: '系统', text: `这一章语音没合成出来：${err.message}`.slice(0, 120) });
+      // 合成失败也要重排，否则会永远停在「准备中」
+      novelRetry = (novelRetry || 0) + 1;
+      if (novelRetry <= 3) {
+        const wait = Math.min(60_000, 8000 * novelRetry);
+        pushEvent({ kind: 'system', username: '系统', text: `${Math.round(wait / 1000)} 秒后再试一次（第 ${novelRetry} 次）。` });
+        scheduleNovel(wait);
+      }
+      return { ok: false, error: err.message };
+    } finally {
+      novelBusy = false;
+    }
+  }
+
+  // reading：音频在播，等 ended 或看门狗（优先用页面回填的真实时长）
+  scheduleNovel(watchdogDelay());
+  return { ok: true, reading: true, waiting: true };
 }
 
 // ---------- 工具 ----------
@@ -816,7 +1250,8 @@ async function serveStatic(req, res, urlPath) {
     const ext = path.extname(file).toLowerCase();
     res.writeHead(200, {
       'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': ext === '.html' ? 'no-store' : 'public, max-age=3600',
+      // 后台脚本包含配置保存逻辑，不能沿用长缓存，否则重启后可能继续运行旧代码。
+      'cache-control': ext === '.html' || ext === '.js' ? 'no-store' : 'public, max-age=3600',
       'access-control-allow-origin': '*',
     });
     res.end(await readFile(file));
@@ -1025,6 +1460,18 @@ const server = createServer(async (req, res) => {
       updateConfig(patch);
       await saveConfig();
       if (patch.ai?.apiKey) balanceAt = 0;
+      if (patch.music && 'neteaseCookie' in patch.music) {
+        // 换了会员 cookie：清掉旧解析缓存和登录态缓存
+        clearMusicCache();
+        memberAt = 0;
+        memberCache = null;
+        await refreshMember({ force: true });
+      }
+      if (patch.danmaku && 'cookie' in patch.danmaku && bridge.state === 'live') {
+        // 换了抖音 cookie：重连一次，才能收到礼物推送
+        const rid = getConfig().danmaku?.roomId || getConfig().roomId;
+        if (rid) startDanmaku(rid).catch((err) => console.warn('[danmaku] 重连失败：', err.message));
+      }
       if (patch.demo !== undefined) {
         patch.demo ? startDemo() : stopDemo();
       }
@@ -1044,12 +1491,20 @@ const server = createServer(async (req, res) => {
       const cur = nextSong();
       if (cur) await resolveCurrent({ force: true });
       broadcast({ type: 'song', ...songView() });
+      if (cur) ensureSystemVolume().catch(() => {});
       return json(res, 200, { ok: true, song: cur });
     }
 
     // ---- 音乐播放源 ----
     if (p === '/api/music' && req.method === 'GET') {
+      await refreshMember();
       return json(res, 200, { ok: true, music: musicView() });
+    }
+
+    // 网易云会员登录态（粘贴 MUSIC_U 后用它检查）
+    if (p === '/api/music/member' && req.method === 'GET') {
+      const m = await refreshMember({ force: url.searchParams.get('force') === '1' });
+      return json(res, 200, { ok: true, member: m, music: musicView() });
     }
 
     if (p === '/api/music/reindex' && req.method === 'POST') {
@@ -1069,6 +1524,7 @@ const server = createServer(async (req, res) => {
       const cur = nextSong();
       if (cur) await resolveCurrent({ force: true });
       broadcast({ type: 'song', ...songView() });
+      if (cur) ensureSystemVolume().catch(() => {});
       return json(res, 200, { ok: true, currentSong: cur, song: songView() });
     }
 
@@ -1097,7 +1553,7 @@ const server = createServer(async (req, res) => {
       return streamFile(req, res, file);
     }
 
-    // ---- 大肥鱼的声音（系统离线 / edge-tts 御姐音）----
+    // ---- 大肥鱼的声音（MiniMax / edge-tts / Kokoro / 系统离线）----
     if (p === '/api/voice' && req.method === 'GET') {
       const cfg = getConfig();
       return json(res, 200, {
@@ -1112,6 +1568,10 @@ const server = createServer(async (req, res) => {
           voices: await listVoices().catch(() => []),
           presets: EDGE_PRESETS,
           kokoro: KOKORO_PRESETS,
+          minimax: MINIMAX_PRESETS,
+          minimaxHasKey: Boolean(process.env.MINIMAX_API_KEY || cfg.voice?.minimaxApiKey),
+          minimaxModel: cfg.voice?.minimaxModel || 'speech-2.8-hd',
+          minimaxVoice: cfg.voice?.minimaxVoice || MINIMAX_PRESETS.lyrical.voiceId,
           lastError: voiceError,
         },
       });
@@ -1143,6 +1603,35 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    /* 系统音量太低是最常见的「直播间没声音」：一键把默认播放设备调到 60% */
+    if (p === '/api/audio/volume' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const target = Math.min(1, Math.max(0.1, Number(body.target ?? 0.6) || 0.6));
+      const script = path.join(ROOT, 'tools', 'audio-loud.ps1');
+      if (!existsSync(script)) return json(res, 500, { ok: false, error: '找不到 tools/audio-loud.ps1' });
+      return new Promise((resolve) => {
+        execFile(
+          'powershell',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, String(target)],
+          { timeout: 60000, windowsHide: true },
+          (err, stdout, stderr) => {
+            const out = String(stdout || '').trim().split(/\r?\n/).filter(Boolean);
+            sysVolLast = out.slice(-1)[0] || sysVolLast;
+            if (err) {
+              json(res, 500, { ok: false, error: (String(stderr || '').trim() || err.message).slice(0, 400), out });
+            } else {
+              json(res, 200, { ok: true, out: out.slice(-3), target });
+            }
+            resolve();
+          },
+        );
+      });
+    }
+
+    if (p === '/api/audio/status' && req.method === 'GET') {
+      return json(res, 200, { ok: true, last: sysVolLast, at: sysVolAt });
+    }
+
     if (p.startsWith('/api/voice/') && req.method === 'GET') {
       const file = voiceMediaPath(p.slice('/api/voice/'.length));
       if (!file) return json(res, 404, { ok: false, error: '没有这段语音' });
@@ -1159,102 +1648,180 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true, stats: statsView() });
     }
 
-    // ---- 讲故事 ----
-    if (p === '/api/story' && req.method === 'GET') {
-      return json(res, 200, { ok: true, story: storyView(getConfig()), tokens: statsView() });
+    // ---- 念小说 ----
+    if (p === '/api/novel' && req.method === 'GET') {
+      return json(res, 200, {
+        ok: true,
+        story: storyView(getConfig()),
+        novels: listNovels(getConfig()).map((n) => ({ name: n.name, day: n.day, size: n.size })),
+        tokens: statsView(),
+      });
     }
 
-    if (p === '/api/story/start' && req.method === 'POST') {
-      startSession();
-      await saveStory();
-      scheduleStory(400);
-      const story = storyView(getConfig());
-      broadcast({ type: 'story', story });
-      return json(res, 200, { ok: true, story });
+    if (p === '/api/novel/list' && req.method === 'GET') {
+      const cfg = getConfig();
+      const novels = listNovels(cfg).map((n) => {
+        let chapters = 0;
+        let chars = 0;
+        try {
+          const f = loadNovelFile(cfg, n.name);
+          chapters = f.chapters?.length || 0;
+          chars = (f.chapters || []).reduce((a, c) => a + c.text.length, 0);
+        } catch {
+          /* 读坏了就只给基本信息 */
+        }
+        return { name: n.name, title: n.title || n.name, day: n.day, size: n.size, chapters, chars };
+      });
+      return json(res, 200, { ok: true, novels, dir: novelDirLabel() });
     }
 
-    if (p === '/api/story/stop' && req.method === 'POST') {
-      stopSession();
-      await saveStory();
-      clearTimeout(storyTimer);
-      storyTimer = null;
-      const story = storyView(getConfig());
-      broadcast({ type: 'story', story });
-      return json(res, 200, { ok: true, story });
+    if (p === '/api/novel/start' && req.method === 'POST') {
+      const body = await readBody(req);
+      const r = startNovel(getConfig(), { file: body.file ? String(body.file) : undefined });
+      if (!r.ok) return json(res, 400, r);
+      broadcastNovel('type');
+      scheduleNovel(400);
+      return json(res, 200, { ok: true, ...r, story: storyView(getConfig()) });
     }
 
-    if (p === '/api/story/next' && req.method === 'POST') {
-      const out = await storyStep();
-      return json(res, out.ok ? 200 : 400, out);
+    if (p === '/api/novel/stop' && req.method === 'POST') {
+      clearTimeout(novelTimer);
+      novelTimer = null;
+      stopNovel();
+      broadcastNovel('idle');
+      return json(res, 200, { ok: true, story: storyView(getConfig()) });
     }
 
-    if (p === '/api/story/auto' && req.method === 'POST') {
+    // 音频放完（页面调的）/ 手动「下一章」
+    if (p === '/api/novel/audio' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const ms = setAudioMs(body.duration);
+      // 时长回填后重排看门狗，避免按字数估的长短偏差
+      const v1 = storyView(getConfig());
+      if (v1.phase === 'reading' && novelTimer) clearTimeout(novelTimer);
+      if (v1.phase === 'reading') scheduleNovel(watchdogDelay());
+      return json(res, 200, { ok: true, audioMs: ms });
+    }
+
+    if (p === '/api/novel/display' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const mode = setDisplayMode(body.mode);
+      broadcastNovel('type');
+      return json(res, 200, { ok: true, mode, story: storyView(getConfig()) });
+    }
+
+    if ((p === '/api/novel/advance' || p === '/api/novel/next') && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const src = p.endsWith('advance') ? 'audio' : 'manual';
+      const v0 = storyView(getConfig());
+      if (src === 'manual' && v0.phase !== 'reading') {
+        const r = nextChapter();
+        broadcastNovel('type');
+        if (!r.more) await makeArchive(getConfig());
+        broadcastNovel('wave');
+        scheduleNovel(500);
+        return json(res, 200, { ok: true, skipped: true, story: storyView(getConfig()) });
+      }
+      const out = await chapterDone(src);
+      return json(res, 200, { ok: true, ...out, story: storyView(getConfig()) });
+    }
+
+    if (p === '/api/novel/auto' && req.method === 'POST') {
       const body = await readBody(req);
       const on = body.auto !== false;
-      updateConfig({ story: { auto: on } });
+      updateConfig({ novel: { auto: on } });
       await saveConfig();
       broadcast({ type: 'config', config: publicConfig() });
-      if (on) scheduleStory(500);
+      if (on) scheduleNovel(500);
       else {
-        clearTimeout(storyTimer);
-        storyTimer = null;
+        clearTimeout(novelTimer);
+        novelTimer = null;
       }
       return json(res, 200, { ok: true, story: storyView(getConfig()) });
     }
 
-    if (p === '/api/story/reset' && req.method === 'POST') {
+    if (p === '/api/novel/reset' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
       resetStory();
-      startSession();
-      await saveStory();
-      const story = storyView(getConfig());
-      broadcast({ type: 'story', story });
-      scheduleStory(800);
-      return json(res, 200, { ok: true, story });
+      const r = startNovel(getConfig(), { file: body.file ? String(body.file) : undefined });
+      broadcastNovel('type');
+      if (r.ok) scheduleNovel(400);
+      return json(res, 200, { ok: r.ok, ...r, story: storyView(getConfig()) });
     }
 
-    if (p === '/api/story/config' && req.method === 'POST') {
+    if (p === '/api/novel/config' && req.method === 'POST') {
       const body = await readBody(req);
       const patch = {};
-      const textKeys = ['title', 'genre', 'world', 'hero', 'cast', 'conflict', 'mystery', 'ending'];
-      for (const k of textKeys) {
-        if (typeof body[k] === 'string') patch[k] = body[k].trim().slice(0, 1200);
+      if (typeof body.dir === 'string' && body.dir.trim()) patch.dir = body.dir.trim().slice(0, 80);
+      if (body.breakSec !== undefined) patch.breakSec = Math.max(30, Math.min(1800, Math.round(Number(body.breakSec) || 300)));
+      if (body.enabled !== undefined) patch.enabled = Boolean(body.enabled);
+      if (body.autoStart !== undefined) patch.autoStart = Boolean(body.autoStart);
+      if (typeof body.startAt === 'string') {
+        const raw = body.startAt.trim();
+        const m = raw.match(/^(\d{1,2})[:：](\d{2})$/);
+        /* 空着 = 用默认 17:00；填 off 才是真的不定时 */
+        patch.startAt = m ? `${String(Number(m[1])).padStart(2, '0')}:${m[2]}` : raw.toLowerCase() === 'off' ? 'off' : '';
+        /* 改了开讲时间，之前那次的提醒记录就作废 */
+        markReminded(0);
       }
-      for (const k of ['openerMin', 'storyMin', 'interactMin', 'totalMin']) {
-        if (body[k] !== undefined && body[k] !== '') patch[k] = Math.max(1, Math.min(180, Math.round(Number(body[k]) || 0)));
-      }
-      if (Array.isArray(body.opener)) {
-        patch.opener = body.opener.map((x) => String(x).trim().slice(0, 260)).filter(Boolean).slice(0, 16);
-      }
-      for (const k of ['immutable', 'changeable']) {
-        if (Array.isArray(body[k])) {
-          patch[k] = body[k].map((x) => String(x).trim().slice(0, 160)).filter(Boolean).slice(0, 12);
-        }
-      }
-      if (Array.isArray(body.rounds)) {
-        patch.rounds = body.rounds
-          .map((r, i) => ({
-            chapter: String(r?.chapter || '').trim().slice(0, 40) || `第 ${i + 1} 段`,
-            beats: Array.isArray(r?.beats)
-              ? r.beats.map((b) => String(b).trim().slice(0, 260)).filter(Boolean).slice(0, 10)
-              : [],
-            defaultNext: String(r?.defaultNext || '').trim().slice(0, 160),
-            choices: Array.isArray(r?.choices)
-              ? r.choices.map((c) => String(c).trim().slice(0, 120)).filter(Boolean).slice(0, 4)
-              : [],
-          }))
-          .filter((r) => r.beats.length)
-          .slice(0, 8);
-      }
-      updateConfig({ story: patch });
+      updateConfig({ novel: patch });
       await saveConfig();
-      resetStory();
-      startSession();
-      await saveStory();
-      const story = storyView(getConfig());
-      broadcast({ type: 'story', story });
       broadcast({ type: 'config', config: publicConfig() });
-      if (getConfig().story?.auto) scheduleStory(1200);
-      return json(res, 200, { ok: true, story });
+      broadcastNovel();
+      if (!String(getConfig().novel?.startAt || '').trim() && getConfig().novel?.enabled && getConfig().novel?.auto) {
+        scheduleNovel(800);
+      }
+      storyScheduleTick().catch(() => {});
+      return json(res, 200, { ok: true, story: storyView(getConfig()), novel: getConfig().novel });
+    }
+
+    if (p === '/api/novel/archive' && req.method === 'POST') {
+      const cfg = getConfig();
+      const obj = await makeArchive(cfg);
+      broadcastNovel('wave');
+      return json(res, 200, { ok: true, archive: obj });
+    }
+
+    /* 手动重生成「本章线索卡」（自动流程里由 chapterDone 触发，这个给调试/补生成用） */
+    if (p === '/api/novel/card' && req.method === 'POST') {
+      const cfg = getConfig();
+      const ch = currentChapter();
+      if (!ch) return json(res, 400, { ok: false, error: '还没开始念，没有当前章节' });
+      const summary = await summarizeChapter(cfg, ch);
+      broadcastNovel('wave');
+      const nv = getNovel() || {};
+      return json(res, 200, { ok: true, summary, card: (nv.cards || [])[nv.idx] || null });
+    }
+
+    if (p === '/api/novel/archive' && req.method === 'GET') {
+      const nv = getNovel() || {};
+      return json(res, 200, {
+        ok: true,
+        archive: nv.archive || null,
+        title: nv.title || '',
+        file: nv.file || '',
+        settings: nv.settings || '',
+        chapters: chaptersOf().map((c) => ({ title: c.title, chars: c.text.length })),
+        summaries: nv.summaries || [],
+        topics: topTopics(12),
+      });
+    }
+
+    if (p === '/api/novel/topics' && req.method === 'GET') {
+      return json(res, 200, { ok: true, topics: topTopics(12) });
+    }
+
+    if (p === '/api/novel/topics' && req.method === 'POST') {
+      const body = await readBody(req);
+      const item = addTopic(body.text, body.user ? String(body.user) : '');
+      if (!item) return json(res, 400, { ok: false, error: '选题是空的' });
+      broadcastNovel();
+      return json(res, 200, { ok: true, topic: item, topics: topTopics(12) });
+    }
+
+    // 旧接口留个壳，免得老页面 404
+    if (p === '/api/story' && req.method === 'GET') {
+      return json(res, 200, { ok: true, story: storyView(getConfig()), tokens: statsView() });
     }
 
     if (p === '/api/health' && req.method === 'GET') {
@@ -1279,11 +1846,28 @@ server.listen(PORT_FINAL, '127.0.0.1', () => {
   console.log('');
   if (getState().currentSong && !getState().currentSong.url) resolveCurrent({ force: true });
   if (cfg.demo) startDemo();
-  if (cfg.story?.enabled && cfg.story?.auto) {
-    const v = storyView(cfg);
-    if (!v.running) console.log('  📖 故事电台：没有在播，点操作台「开始这一场」或等自动开始');
-    scheduleStory(2200);
+  if (cfg.novel?.enabled && cfg.novel?.auto) {
+    const list = listNovels(cfg);
+    if (!list.length) {
+      console.log(`  📖 小说朗读：「${cfg.novel?.dir || '短篇'}」里还没有小说，放一个 .txt 进去就会自动念`);
+    } else {
+      const v = storyView(cfg);
+      const pick = v.file || list[0].name;
+      console.log(`  📖 小说朗读：${pick}（${v.chapterCount || '?'} 章）${v.phase !== 'idle' ? `· 接着上次的进度（${v.phaseLabel}）` : ''}`);
+    }
+    /* 设了开讲时间：到点再念，之前先陪聊；没设就开窗即念 */
+    const at = nextStartMs(cfg);
+    if (at && (storyView(cfg).phase === 'idle' || storyView(cfg).phase === 'done')) {
+      console.log(`  ⏰ 定时开讲：${fmtHm(at)}（提前 5 分钟会提醒一次）`);
+    } else {
+      scheduleNovel(2200);
+    }
   }
+  /* 定时器：每分钟看一次要不要提醒 / 开讲 */
+  setInterval(() => {
+    storyScheduleTick().catch((err) => console.warn('[schedule]', err.message));
+  }, 60_000);
+  storyScheduleTick().catch(() => {});
   if (cfg.danmaku?.mode !== 'off') {
     const rid = cfg.danmaku?.roomId || cfg.roomId || '';
     if (rid) {

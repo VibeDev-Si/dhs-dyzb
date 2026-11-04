@@ -88,6 +88,11 @@
       $('backupKey').value = '';
       $('backupKey').placeholder = c.ai.backup?.hasKey ? '已保存（留空则不改）' : '备用 Key';
     }
+    if (document.activeElement !== $('voMinimaxKey')) {
+      $('voMinimaxKey').value = '';
+      $('voMinimaxKey').placeholder = c.voice?.minimaxHasKey ? '已保存（留空则不改）' : '粘贴 MiniMax API Key';
+    }
+    paintMinimaxKeyState(c.voice?.minimaxHasKey);
     $('autoReply').checked = Boolean(c.reply?.auto);
     gifts = c.gifts || [];
     const sel = $('tGift');
@@ -102,7 +107,7 @@
       const d = await api('/api/state', null, 'GET');
       setConn(true, '服务已连接');
       fillConfig(d.config);
-      fillStory(d.config, d.story);
+      fillNovel(d.config, d.story);
       const st = { ...d.stats };
       st.__balance = d.balance && typeof d.balance.total === 'number' ? money(d.balance.total) : '—';
       render(d.config, st);
@@ -122,148 +127,209 @@
     }
   }
 
-  // ---- 故事电台 ----
-  let storyState = null;
+  // ---- 小说朗读 ----
+  let nvState = null;
+  let nvFiles = [];
 
-  const lines = (v) => String(v || '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-  const pipes = (v) => String(v || '').split('|').map((s) => s.trim()).filter(Boolean);
-
-  function addRound(round = {}) {
-    const node = $('roundTpl').content.firstElementChild.cloneNode(true);
-    node.querySelector('[data-f="chapter"]').value = round.chapter || '';
-    node.querySelector('[data-f="beats"]').value = (round.beats || []).join('\n');
-    node.querySelector('[data-f="defaultNext"]').value = round.defaultNext || '';
-    node.querySelector('[data-f="choices"]').value = (round.choices || []).join(' | ');
-    node.querySelector('[data-act="del"]').onclick = () => {
-      node.remove();
-      renumber();
-    };
-    $('stRounds').appendChild(node);
-    renumber();
-    return node;
-  }
-
-  function renumber() {
-    [...$('stRounds').children].forEach((n, i) => {
-      n.querySelector('[data-n]').textContent = String(i + 1);
-    });
-  }
-
-  function collectStory() {
-    const rounds = [...$('stRounds').children].map((n, i) => ({
-      chapter: n.querySelector('[data-f="chapter"]').value.trim() || `第 ${i + 1} 段`,
-      beats: lines(n.querySelector('[data-f="beats"]').value),
-      defaultNext: n.querySelector('[data-f="defaultNext"]').value.trim(),
-      choices: pipes(n.querySelector('[data-f="choices"]').value),
-    }));
-    return {
-      title: $('stTitle').value.trim(),
-      genre: $('stGenre').value.trim(),
-      world: $('stWorld').value.trim(),
-      hero: $('stHero').value.trim(),
-      cast: $('stCast').value.trim(),
-      conflict: $('stConflict').value.trim(),
-      mystery: $('stMystery').value.trim(),
-      ending: $('stEnding').value.trim(),
-      immutable: lines($('stImmutable').value),
-      changeable: lines($('stChangeable').value),
-      openerMin: Number($('stOpenerMin').value) || 10,
-      storyMin: Number($('stStoryMin').value) || 6,
-      interactMin: Number($('stInteractMin').value) || 4,
-      totalMin: Number($('stTotalMin').value) || 60,
-      opener: lines($('stOpener').value),
-      rounds,
-    };
-  }
-
-  function fillStory(c, s) {
-    if (!c || !c.story) return;
-    const st = c.story;
-    storyState = s || null;
-    if (document.activeElement !== $('stTitle')) $('stTitle').value = st.title || '';
-    if (document.activeElement !== $('stGenre')) $('stGenre').value = st.genre || '';
-    if (document.activeElement !== $('stWorld')) $('stWorld').value = st.world || '';
-    if (document.activeElement !== $('stHero')) $('stHero').value = st.hero || '';
-    if (document.activeElement !== $('stCast')) $('stCast').value = st.cast || '';
-    if (document.activeElement !== $('stConflict')) $('stConflict').value = st.conflict || '';
-    if (document.activeElement !== $('stMystery')) $('stMystery').value = st.mystery || '';
-    if (document.activeElement !== $('stEnding')) $('stEnding').value = st.ending || '';
-    if (document.activeElement !== $('stImmutable')) $('stImmutable').value = (st.immutable || []).join('\n');
-    if (document.activeElement !== $('stChangeable')) $('stChangeable').value = (st.changeable || []).join('\n');
-    if (document.activeElement !== $('stOpenerMin')) $('stOpenerMin').value = st.openerMin || 10;
-    if (document.activeElement !== $('stStoryMin')) $('stStoryMin').value = st.storyMin || 6;
-    if (document.activeElement !== $('stInteractMin')) $('stInteractMin').value = st.interactMin || 4;
-    if (document.activeElement !== $('stTotalMin')) $('stTotalMin').value = st.totalMin || 60;
-    if (document.activeElement !== $('stOpener')) $('stOpener').value = (st.opener || []).join('\n');
-
-    if (!document.activeElement.closest?.('#stRounds')) {
-      $('stRounds').innerHTML = '';
-      for (const r of st.rounds || []) addRound(r);
-      if (!$('stRounds').children.length) addRound();
+  async function loadNovels() {
+    const d = await api('/api/novel/list', null, 'GET');
+    nvFiles = d.novels || [];
+    const sel = $('nvFile');
+    const keep = sel.value;
+    sel.innerHTML = '';
+    for (const n of nvFiles) {
+      const opt = document.createElement('option');
+      opt.value = n.name;
+      opt.textContent = `${n.title} · ${n.chapters} 章 · ${n.chars} 字${n.day ? ' · 今天' : ''}`;
+      sel.appendChild(opt);
     }
+    if (keep && nvFiles.some((n) => n.name === keep)) sel.value = keep;
+    if (!nvFiles.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '短篇目录里还没有小说';
+      sel.appendChild(opt);
+    }
+    return nvFiles;
+  }
 
-    $('storyAuto').checked = Boolean(s?.auto);
-    if (s) {
-      const next = s.next ? `下一条：${s.next.type}（${Math.round(s.next.inSec / 60)} 分钟后）` : '';
-      $('storyResult').className = 'result show';
-      $('storyResult').textContent = [
-        `阶段：${s.phaseLabel}${s.chapter ? ` · ${s.chapter}` : ''}`,
-        `进度：第 ${s.round + 1} / ${s.roundCount} 段 · 已过 ${Math.floor(s.elapsedSec / 60)} 分钟 · 剩 ${s.countdown}`,
-        s.text ? `刚讲的：${s.text.slice(0, 70)}${s.text.length > 70 ? '…' : ''}` : '',
-        s.summary ? `本段总结：${s.summary}` : '',
-        s.suggestions?.length ? `观众建议：${s.suggestions.map((x) => `「${x.text}」×${x.count}`).join(' ')}` : '',
-        next,
-      ]
-        .filter(Boolean)
-        .join('\n');
+  function renderArchiveBox(a) {
+    const box = $('nvArchive');
+    if (!a) {
+      box.textContent = '还没读完。整本念完会自动生成世界观、人物、优点、短板和想问观众的问题。';
+      return;
+    }
+    const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    const part = (title, body) => (body ? `<h4>${esc(title)}</h4>${body}` : '');
+    const chars = (a.characters || [])
+      .map((c) => `<p><b>${esc(c.name)}</b>${c.role ? ` · ${esc(c.role)}` : ''}${c.note ? `：${esc(c.note)}` : ''}</p>`)
+      .join('');
+    const list = (arr) => (arr || []).map((x) => `<li>${esc(x)}</li>`).join('');
+    box.innerHTML = [
+      part('世界观', a.world ? `<p>${esc(a.world)}</p>` : ''),
+      part('人物', chars),
+      part('主题', a.themes?.length ? `<ul>${list(a.themes)}</ul>` : ''),
+      part('写得好的地方', a.highlights?.length ? `<ul>${list(a.highlights)}</ul>` : ''),
+      part('可以更好的地方', a.flaws?.length ? `<ul>${list(a.flaws)}</ul>` : ''),
+      part('想问问你们', a.questions?.length ? `<ul>${list(a.questions)}</ul>` : ''),
+    ].join('');
+  }
+
+  function renderTopics(topics) {
+    const ol = $('nvTopics');
+    ol.innerHTML = '';
+    if (!topics?.length) {
+      ol.innerHTML = '<li class="hint">还没有人选。弹幕里发「选题 XXX」就会出现在这里。</li>';
+      return;
+    }
+    for (const t of topics) {
+      const li = document.createElement('li');
+      li.innerHTML = `<b>${t.count}</b> 票 · ${String(t.text || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}${
+        t.users?.length ? ` <span class="hint">（${t.users.slice(0, 4).join('、')}）</span>` : ''
+      }`;
+      ol.appendChild(li);
     }
   }
 
-  $('stAddRound').onclick = () => addRound();
+  function fillNovel(c, s) {
+    if (c?.novel) {
+      if (document.activeElement !== $('nvDir')) $('nvDir').value = c.novel.dir || '短篇';
+      if (document.activeElement !== $('nvBreakSec')) $('nvBreakSec').value = c.novel.breakSec ?? 300;
+      if (document.activeElement !== $('nvStartAt')) $('nvStartAt').value = c.novel.startAt || '';
+      $('nvAutoStart').checked = c.novel.autoStart !== false;
+      $('nvEnabled').checked = c.novel.enabled !== false;
+      $('nvAuto').checked = Boolean(s?.auto);
+    }
+    nvState = s || null;
+    if (!s) return;
+    const lines = [
+      `阶段：${s.phaseLabel || s.phase}${s.startAt ? ` · ${s.startAt} 开讲${s.autoStart ? '（自动）' : '（手动）'}` : ''}`,
+      `${s.title ? `《${s.title}》` : '（还没选小说）'}${
+        s.chapterCount ? ` · 第 ${Math.min((s.chapterIndex || 0) + 1, s.chapterCount)} / ${s.chapterCount} 章` : ''
+      }${s.chapter && s.chapter !== s.title ? ` · ${s.chapter}` : ''}`,
+      s.phase === 'break' && s.countdown ? `休息还剩 ${s.countdown}` : '',
+      s.phase === 'reading' ? `正在念：${(s.chars || 0)} 字${s.audioUrl ? ' · 音频已合成' : ' · 还没合成音频'}` : '',
+      s.phase === 'idle' && s.nextStartAt
+        ? `距离开讲还有 ${Math.max(0, Math.round((s.nextStartAt - Date.now()) / 60000))} 分钟`
+        : '',
+      s.charTotal ? `全书 ${s.charTotal} 字` : '',
+      s.audioError ? `音频出错：${s.audioError}` : '',
+    ];
+    $('nvState').className = 'result show';
+    $('nvState').textContent = lines.filter(Boolean).join('\n');
+    renderArchiveBox(s.archive);
+    renderTopics(s.topics);
+  }
 
-  $('storySave').onclick = async () => {
-    const payload = collectStory();
-    if (!payload.opener.length) return alert('开场还是空的');
-    if (!payload.rounds.length || !payload.rounds.some((r) => r.beats.length)) return alert('每段至少要有一拍');
-    if (!confirm(`保存后从这一场开头重讲：开场 ${payload.opener.length} 拍 + ${payload.rounds.length} 段，继续吗？`)) return;
+  $('nvSaveStart').onclick = async () => {
     try {
-      await api('/api/story/config', payload);
+      const startAt = ($('nvStartAt').value || '').trim();
+      await api('/api/novel/config', { startAt, autoStart: $('nvAutoStart').checked });
+      $('nvResult').className = 'result show';
+      $('nvResult').textContent = startAt
+        ? `已设为 ${startAt} 开讲${$('nvAutoStart').checked ? '（到点自动开始）' : '（到点只提醒，需要手动开始）'}，开讲前 5 分钟会提醒观众。`
+        : '已取消定时，现在打开就会开始念。';
       await refresh();
     } catch (err) {
-      alert(err.message);
+      $('nvResult').className = 'result show warn';
+      $('nvResult').textContent = '保存失败：' + err.message;
     }
   };
 
-  $('storyStart').onclick = async () => {
-    await api('/api/story/start', {});
-    await refresh();
-  };
-
-  $('storyNext').onclick = async () => {
-    $('storyResult').className = 'result show';
-    $('storyResult').textContent = '本鲸正在讲…';
+  $('nvSaveCfg').onclick = async () => {
     try {
-      const d = await api('/api/story/next', {});
-      $('storyResult').textContent = d.story?.text || '（这一条是空场）';
+      await api('/api/config', {
+        novel: {
+          dir: $('nvDir').value.trim() || '短篇',
+          breakSec: Number($('nvBreakSec').value) || 300,
+          enabled: $('nvEnabled').checked,
+        },
+      });
+      await api('/api/novel/config', {
+        dir: $('nvDir').value.trim() || '短篇',
+        breakSec: Number($('nvBreakSec').value) || 300,
+        enabled: $('nvEnabled').checked,
+      });
+      $('nvResult').className = 'result show';
+      $('nvResult').textContent = '设置已保存。';
       await refresh();
     } catch (err) {
-      $('storyResult').textContent = '没讲成：' + err.message;
+      $('nvResult').className = 'result show warn';
+      $('nvResult').textContent = '保存失败：' + err.message;
     }
   };
 
-  $('storyStop').onclick = async () => {
-    await api('/api/story/stop', {});
+  $('nvRefresh').onclick = async () => {
+    try {
+      const list = await loadNovels();
+      $('nvResult').className = 'result show';
+      $('nvResult').textContent = list.length ? `找到 ${list.length} 本。` : '短篇目录里还没有小说。';
+    } catch (err) {
+      $('nvResult').className = 'result show warn';
+      $('nvResult').textContent = '读取失败：' + err.message;
+    }
+  };
+
+  $('nvStart').onclick = async () => {
+    const file = $('nvFile').value;
+    if (!file) return alert('先挑一本小说');
+    $('nvResult').className = 'result show';
+    $('nvResult').textContent = '正在开始…';
+    try {
+      const d = await api('/api/novel/start', { file });
+      $('nvResult').textContent = d.ok ? `开始念《${d.story?.title || file}》。` : `没开始：${d.error || '未知原因'}`;
+      await refresh();
+    } catch (err) {
+      $('nvResult').textContent = '没开始：' + err.message;
+    }
+  };
+
+  $('nvNext').onclick = async () => {
+    try {
+      const d = await api('/api/novel/next', {});
+      $('nvResult').className = 'result show';
+      $('nvResult').textContent = d.phase === 'afterword' ? '整本念完了，正在生成作品档案。' : '跳到下一章。';
+      await refresh();
+    } catch (err) {
+      $('nvResult').textContent = '跳章失败：' + err.message;
+    }
+  };
+
+  $('nvAdvance').onclick = async () => {
+    try {
+      await api('/api/novel/advance', {});
+      $('nvResult').className = 'result show';
+      $('nvResult').textContent = '这一章算念完了，开始休息。';
+      await refresh();
+    } catch (err) {
+      $('nvResult').textContent = '推进失败：' + err.message;
+    }
+  };
+
+  $('nvStop').onclick = async () => {
+    await api('/api/novel/stop', {});
     await refresh();
   };
 
-  $('storyAuto').onchange = async () => {
-    await api('/api/story/auto', { auto: $('storyAuto').checked });
+  $('nvReset').onclick = async () => {
+    const file = $('nvFile').value;
+    if (!file) return alert('先挑一本小说');
+    if (!confirm(`从头念《${file}》？已经念完的章节会重来。`)) return;
+    await api('/api/novel/reset', { file });
     await refresh();
   };
 
-  $('storyReset').onclick = async () => {
-    if (!confirm('从这一场开头重来？已经讲过的会丢掉。')) return;
-    await api('/api/story/reset', {});
+  $('nvEnabled').onchange = () => $('nvSaveCfg').click();
+  $('nvAuto').onchange = async () => {
+    await api('/api/novel/auto', { auto: $('nvAuto').checked });
+    await refresh();
+  };
+
+  $('nvTopicAdd').onclick = async () => {
+    const text = $('nvTopic').value.trim();
+    if (!text) return;
+    await api('/api/novel/topics', { text, user: '操作台' });
+    $('nvTopic').value = '';
     await refresh();
   };
 
@@ -357,6 +423,7 @@
     if (d.roomId && d.roomId !== d.webRid) bits.push(`会话 ${d.roomId.slice(-6)}`);
     if (d.title) bits.push(d.title.slice(0, 18));
     if (d.messages) bits.push(`已收 ${d.messages} 条`);
+    if (d.hasCookie) bits.push('带登录态');
     if (d.lastError) bits.push(d.lastError);
     const box = $('dmResult');
     if (!box) return;
@@ -366,6 +433,30 @@
   }
 
   if ($('dmConnect')) {
+    $('dmCookieSave').onclick = async () => {
+      const cookie = $('dmCookie').value.trim();
+      if (!cookie) return alert('先把浏览器里那一整行 Cookie 粘进来');
+      try {
+        await api('/api/config', { patch: { danmaku: { cookie } } });
+        $('dmCookie').value = '';
+        $('dmResult').className = 'result show';
+        $('dmResult').textContent = 'Cookie 已保存（会重连一次弹幕通道），礼物消息需要它。';
+        setTimeout(loadDanmaku, 1200);
+      } catch (err) {
+        $('dmResult').textContent = '保存失败：' + err.message;
+      }
+    };
+    $('dmCookieClear').onclick = async () => {
+      try {
+        await api('/api/config', { patch: { danmaku: { cookie: '' } } });
+        $('dmResult').className = 'result show';
+        $('dmResult').textContent = 'Cookie 已清除。';
+        setTimeout(loadDanmaku, 800);
+      } catch (err) {
+        $('dmResult').textContent = '清除失败：' + err.message;
+      }
+    };
+
     $('dmConnect').onclick = async () => {
       const rid = $('dmRoom').value.trim();
       if (!rid) return alert('先填直播间号');
@@ -418,6 +509,19 @@
     await api('/api/event', { kind: 'enter', username: $('tName').value.trim() || '测试观众', source: 'admin' });
   };
 
+  $('resetLive').onclick = async () => {
+    if (!confirm('清空直播画面上的所有弹幕和点歌队列？（小说进度、礼物收益、token 统计都保留）')) return;
+    $('resetLiveHint').textContent = '正在清场…';
+    try {
+      const d = await api('/api/session/boot', {});
+      const c = d.cleared || {};
+      $('resetLiveHint').textContent = `已重置：清掉 ${c.song || 0} 首在播/排队、${c.events || 0} 条弹幕、${c.outbox || 0} 条发送箱、${c.replies || 0} 条待回复。`;
+      await refresh();
+    } catch (err) {
+      $('resetLiveHint').textContent = '重置失败：' + err.message;
+    }
+  };
+
   $('sendSay').onclick = async () => {
     const text = $('sayText').value.trim();
     if (!text) return;
@@ -462,6 +566,8 @@
   const pct = (v) => `${Math.round(Number(v) * 100)}%`;
   const VOICE_ENGINES = {
     'sapi:sapi': { engine: 'sapi', preset: '' },
+    'minimax:cuteGirl': { engine: 'minimax', preset: 'cuteGirl' },
+    'minimax:lyrical': { engine: 'minimax', preset: 'lyrical' },
     'edge:natural': { engine: 'edge', preset: 'natural' },
     'edge:warm': { engine: 'edge', preset: 'warm' },
     'edge:leng': { engine: 'edge', preset: 'leng' },
@@ -481,13 +587,25 @@
     $('voRate').value = String(v.rate ?? 1);
     const key = `${v.engine || 'edge'}:${v.engine === 'sapi' ? 'sapi' : v.preset || 'natural'}`;
     if (VOICE_ENGINES[key]) $('voEngine').value = key;
-    const preset = v.engine === 'kokoro' ? (v.kokoro || {})[v.preset] : (v.presets || {})[v.preset];
+    const preset = v.engine === 'kokoro'
+      ? (v.kokoro || {})[v.preset]
+      : v.engine === 'minimax'
+        ? (v.minimax || {})[v.preset]
+        : (v.presets || {})[v.preset];
     const label =
       v.engine === 'sapi'
         ? `系统语音 · ${v.name || 'Huihui'}`
-        : `${preset?.label || v.preset || ''} · ${preset?.voice || v.name || ''}${preset?.note ? ` · ${preset.note}` : ''}`;
+        : `${preset?.label || v.preset || ''} · ${preset?.voiceId || preset?.voice || v.name || ''}${preset?.note ? ` · ${preset.note}` : ''}${v.engine === 'minimax' && v.minimaxHasKey === false ? ' · 未配置 API Key' : ''}`;
     $('voName').textContent = label;
+    paintMinimaxKeyState(v.minimaxHasKey);
     if (v.lastError) $('voResult').textContent = `上次出错：${v.lastError}`;
+  }
+
+  function paintMinimaxKeyState(hasKey) {
+    const el = $('voMinimaxKeyState');
+    if (!el) return;
+    el.textContent = hasKey ? '已配置（输入框不会回显）' : '未配置';
+    el.classList.toggle('warn', !hasKey);
   }
 
   async function loadVoice() {
@@ -507,6 +625,31 @@
   $('voRate').onchange = () => saveVoice();
   $('voEngine').onchange = () => saveVoice();
   $('voList').onclick = () => loadVoice();
+
+  $('saveMinimaxKey').onclick = async () => {
+    const key = $('voMinimaxKey').value.trim();
+    if (!key) {
+      $('voMinimaxKeyState').textContent = '请输入 Key；留空不会覆盖已有配置';
+      $('voMinimaxKeyState').classList.add('warn');
+      return;
+    }
+    const button = $('saveMinimaxKey');
+    button.disabled = true;
+    $('voMinimaxKeyState').textContent = '正在保存…';
+    try {
+      const d = await api('/api/config', { patch: { voice: { minimaxApiKey: key } } });
+      $('voMinimaxKey').value = '';
+      fillConfig(d.config);
+      await loadVoice();
+      $('voMinimaxKeyState').textContent = '已保存（输入框不会回显）';
+      $('voMinimaxKeyState').classList.remove('warn');
+    } catch (e) {
+      $('voMinimaxKeyState').textContent = `保存失败：${e.message}`;
+      $('voMinimaxKeyState').classList.add('warn');
+    } finally {
+      button.disabled = false;
+    }
+  };
 
   let voiceTimer = null;
   function saveVoice() {
@@ -535,9 +678,16 @@
       const a = new Audio(d.url);
       a.volume = Number($('voVolume').value);
       await a.play().catch(() => {});
-      $('voResult').textContent = d.cached
-        ? `试听中（缓存命中：${d.url}）`
-        : `试听中（合成 ${d.ms}ms${d.engine === 'edge' ? '，在线御姐音' : ''}）`;
+      if (d.engine === 'minimax') {
+        const detail = `${d.model || 'speech-2.8-hd'} · ${d.voice || 'MiniMax'}`;
+        $('voResult').textContent = d.cached
+          ? `试听中（${detail} · 缓存命中）`
+          : `试听中（${detail} · 合成 ${d.ms}ms）`;
+      } else {
+        $('voResult').textContent = d.cached
+          ? `试听中（缓存命中：${d.url}）`
+          : `试听中（${d.engine} 合成 ${d.ms}ms）`;
+      }
     } catch (e) {
       $('voResult').textContent = `试听失败：${e.message}`;
     }
@@ -612,6 +762,21 @@
     previewState('已停止');
   };
 
+  /* 直播窗有进度条却没声音，多半是系统音量太低：一键改默认播放设备的音量 */
+  $('muSysVol').onclick = async () => {
+    $('muSysVol').disabled = true;
+    previewState('正在调系统音量…');
+    try {
+      const d = await api('/api/audio/volume', { target: 0.6 });
+      const line = (d.out || []).slice(-1)[0] || '';
+      previewState(`系统音量已调整：${line}`, false);
+    } catch (e) {
+      previewState('调整失败：' + e.message, true);
+    } finally {
+      $('muSysVol').disabled = false;
+    }
+  };
+
   // 一声 880Hz 的短提示音：不依赖任何文件，用来判断「浏览器/系统到底有没有出声」
   $('muBeep').onclick = async () => {
     try {
@@ -646,15 +811,49 @@
     }
     if (m.apiBase != null) $('muApiBase').value = m.apiBase;
     $('muStatus').textContent = `本地曲库 ${m.tracks ?? 0} 首 · 音源 ${m.provider || 'auto'}`;
+    paintMember(m);
+  }
+
+  /* 会员登录态：cookie 永远不回显，只显示「有没有 / 登录成了谁」 */
+  function paintMember(m) {
+    const box = $('muMember');
+    if (!box) return;
+    const mem = m?.member || {};
+    const hasCookie = Boolean(m?.hasCookie || mem.hasCookie);
+    $('muCookie').value = '';
+    $('muCookie').placeholder = hasCookie
+      ? '已保存会员 cookie（要换就重新粘贴一次）'
+      : '粘贴 MUSIC_U=...（浏览器登录 music.163.com 后从 Cookie 里复制）';
+    if (mem.loggedIn) {
+      const vip = mem.vip ? '会员' : '非会员';
+      box.textContent = `已登录：${mem.nickname || mem.userId || '网易云账号'}（${vip}）· 会员歌可以直接放`;
+      box.classList.remove('warn');
+    } else if (hasCookie) {
+      box.textContent = '存了 cookie，但没验证通过（可能过期了）——重新登录再复制一次';
+      box.classList.add('warn');
+    } else {
+      box.textContent = '未绑定会员 · 免费歌直接放，会员歌会退回翻唱或记下歌名';
+      box.classList.remove('warn');
+    }
   }
 
   async function loadMusic() {
     try {
       const d = await api('/api/music', null, 'GET');
       paintMusic(d.music);
+      const cfg = await api('/api/config', null, 'GET').catch(() => null);
+      if (cfg?.config?.audio && $('muAutoVol')) $('muAutoVol').checked = Boolean(cfg.config.audio.autoVolume);
     } catch {
       /* 忽略 */
     }
+  }
+
+  if ($('muAutoVol')) {
+    $('muAutoVol').onchange = async () => {
+      const on = $('muAutoVol').checked;
+      await api('/api/config', { patch: { audio: { autoVolume: on, target: 0.6 } } });
+      previewState(on ? '已开启：放歌/念新章时会自动把系统音量抬到 60%' : '已关闭：不再自动改系统音量');
+    };
   }
 
   $('muSave').onclick = async () => {
@@ -663,13 +862,37 @@
         music: {
           provider: $('muProvider').value,
           dir: $('muDir').value.trim() || 'music',
-          volume: Number($('muVolume').value) || 0.75,
+          volume: Number($('muVolume').value) || 0.2,
           apiBase: $('muApiBase').value.trim(),
         },
       },
     });
     await loadMusic();
     alert('声音设置已保存');
+  };
+
+  /* 会员 cookie：只写不读——保存后立刻验一次登录态 */
+  $('muCookieSave').onclick = async () => {
+    const raw = $('muCookie').value.trim();
+    if (!raw) {
+      alert('先把 MUSIC_U 粘进来；想清掉会员登录就点「检查」旁边的清空');
+      return;
+    }
+    await api('/api/config', { patch: { music: { neteaseCookie: raw } } });
+    $('muCookie').value = '';
+    await loadMusic();
+  };
+
+  $('muCookieTest').onclick = async () => {
+    $('muMember').textContent = '正在问网易云…';
+    try {
+      const d = await api('/api/music/member?force=1', null, 'GET');
+      paintMember(d.music);
+      if (!d.member?.loggedIn) $('muMember').classList.add('warn');
+    } catch (e) {
+      $('muMember').textContent = `检查失败：${e.message}`;
+      $('muMember').classList.add('warn');
+    }
   };
 
   $('muVolume').oninput = () => {
@@ -762,14 +985,16 @@
     ql.innerHTML = rows.length ? rows.join('') : '<li>队列空着</li>';
   }
 
-  setInterval(async () => {
+  async function loadDanmaku() {
     try {
       const d = await api('/api/danmaku', null, 'GET');
       paintDanmaku(d.danmaku);
     } catch {
       /* 忽略 */
     }
-  }, 5000);
+  }
+
+  setInterval(loadDanmaku, 5000);
 
   try {
     switchTab(localStorage.getItem('dfy.admin.tab') || 'basic');
@@ -778,6 +1003,7 @@
   }
   loadMusic();
   loadVoice();
+  loadNovels().catch(() => {});
 
   $('sendChat').disabled = false;
   refresh();

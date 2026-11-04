@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "dev": "node --watch server.mjs"
+    "dev": "node --watch server.mjs",
+    "pages": "node tools/restart-pages.mjs --server"
   },
   "engines": {
     "node": ">=18"

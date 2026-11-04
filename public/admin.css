@@ -174,3 +174,41 @@ textarea:focus { border-color: #ff9dc4; box-shadow: 0 0 0 3px rgba(255, 157, 196
 #muPreviewBtn.playing { background: linear-gradient(135deg, #a7f3d0, #6ee7b7); color: #065f46; border: 0; }
 .hint.warn { color: #b45309; }
 
+
+/* 小说朗读：选题票 + 作品档案 */
+.topic-list {
+  margin: 10px 0 0;
+  padding-left: 22px;
+  color: var(--ink, #3a2440);
+  font-size: 14px;
+  line-height: 1.9;
+}
+.topic-list li.hint {
+  list-style: none;
+  margin-left: -22px;
+  color: #8a7080;
+}
+.topic-list b {
+  color: #e0559a;
+}
+.archive-box {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #4a3350;
+}
+.archive-box h4 {
+  margin: 12px 0 4px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  color: #b04a86;
+}
+.archive-box h4:first-child {
+  margin-top: 0;
+}
+.archive-box p {
+  margin: 0 0 4px;
+}
+.archive-box ul {
+  margin: 0 0 6px;
+  padding-left: 20px;
+}

@@ -22,3 +22,9 @@ music/*.ogg
 voice-src/*.wav
 voice-src/*.mp3
 voice-src/*.m4a
+
+# 本地临时/产出目录（小说正文、自动化写作工作区、调试产物）
+.tmp-dom/
+DaisyWriter/
+短篇/
+music/voices.npz.bak

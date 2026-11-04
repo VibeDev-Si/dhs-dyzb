@@ -3,7 +3,8 @@
   "roomId": "",
   "danmaku": {
     "mode": "auto",
-    "roomId": ""
+    "roomId": "",
+    "cookie": ""
   },
   "ai": {
     "enabled": true,
@@ -11,7 +12,7 @@
     "apiKey": "",
     "model": "deepseek-flash",
     "temperature": 1.1,
-    "maxTokens": 420,
+    "maxTokens": 220,
     "minReplyGapMs": 3500,
     "maxRepliesPerMinute": 8,
     "replyToGifts": true,
@@ -58,6 +59,14 @@
   "scene": {
     "bgAlpha": 0.82
   },
+  "novel": {
+    "enabled": true,
+    "auto": true,
+    "dir": "短篇",
+    "breakSec": 300,
+    "startAt": "",
+    "autoStart": true
+  },
   "story": {
     "enabled": true,
     "auto": true,
@@ -86,10 +95,10 @@
     "totalMin": 60,
     "opener": [
       "潮汐湾的傍晚是深蓝色的。风把盐味吹进邮局的窗缝，窗台上那盆薄荷被吹得一晃一晃。桌上摊着七封信，只有最后一封，没有地址。",
-      "这间邮局叫鲸鱼邮局，只在夜里开门，只收一种信——寄给还没有遇见的人。每天涨潮，信就会被海水从门缝推进来，像有人隔着很远的地方，轻轻递了一件东西。",
-      "我是这里唯一的夜班邮差，大肥鱼。蓝头发，鲸鱼尾巴，围裙是洗到发白的那件。镇上的人不太写信，他们更愿意把话咽回去，第二天再装作什么都没发生。",
+      "这间邮局叫鲸鱼邮局，只在夜里开门，只收一种信——寄给还没有遇见的人。每天涨潮，信就会被海水从门缝推进来。",
+      "我是这里唯一的夜班邮差，大肥鱼。蓝头发，鲸鱼尾巴，围裙是洗到发白的那件。镇上的人不太写信，他们更愿意把话咽回去。",
       "今晚这封不一样。信封是旧纸的，墨迹被潮气泡开，只剩下几个字：「寄给还没有遇见的人」。没有署名，没有日期。可这张邮票，我认得。",
-      "三年前我丢过一枚一模一样的邮票——鲸鱼尾巴朝着北方。现在它贴在这封不知道是谁寄来的信上，边缘还留着我当年不小心折出的那道折痕。"
+      "三年前我丢过一枚一模一样的邮票——鲸鱼尾巴朝着北方。现在它贴在这封不知道是谁寄来的信上，边缘还留着我当年折出的那道折痕。"
     ],
     "rounds": [
       {
@@ -97,7 +106,7 @@
         "beats": [
           "我把信放到灯下。信封上的蓝墨水已经很淡，只剩那句「寄给还没有遇见的人」，像一句被人反复念过的话。",
           "灯芯跳了一下。邮票忽然亮起来，不刺眼，像深海里有人点了盏小灯，正慢慢朝这边浮上来。",
-          "老邮差在门口站了很久，才说：这种邮票只贴得住「还没说出口的话」。说完他就把嘴闭上了，像怕自己说多了。"
+          "老邮差在门口站了很久，才说：这种邮票只贴得住「还没说出口的话」。说完他就把嘴闭上了。"
         ],
         "defaultNext": "顺着邮票上鲸鱼尾巴的方向，去北边的旧码头看看。",
         "choices": [
@@ -222,19 +231,32 @@
     }
   ],
   "music": {
-    "provider": "auto",
+    "provider": "netease",
     "dir": "music",
-    "volume": 0.19,
-    "apiBase": ""
+    "volume": 0.11,
+    "queueMax": 3,
+    "apiBase": "",
+    "neteaseCookie": ""
   },
   "voice": {
     "enabled": true,
     "volume": 0.9,
     "rate": 1,
-    "engine": "edge",
+    "engine": "minimax",
     "voice": "Microsoft Huihui Desktop",
-    "preset": "warm",
-    "duck": 1
+    "preset": "cuteGirl",
+    "minimaxVoice": "cute_girl",
+    "minimaxModel": "speech-2.8-hd",
+    "minimaxEmotion": "happy",
+    "minimaxBaseUrl": "",
+    "minimaxPitch": 0,
+    "duck": 1,
+    "minimaxApiKey": "",
+    "apiKey": ""
+  },
+  "audio": {
+    "autoVolume": false,
+    "target": 0.6
   },
   "demo": false
 }
