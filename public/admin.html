@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>大肥鱼 · 操作台</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐋</text></svg>" />
-<link rel="stylesheet" href="/admin.css" />
+<link rel="stylesheet" href="/admin.css?v=20261105-radio2" />
 </head>
 <body>
 <header class="top">
@@ -17,14 +17,112 @@
 </header>
 
 <nav class="tabs" id="tabs">
-  <button class="tab active" data-pane="basic">① 基础设置</button>
+  <button class="tab active" data-pane="radio">📻 电台 <span class="tab-badge" id="rdTabBadge" hidden>0</span></button>
+  <button class="tab" data-pane="basic">① 基础设置</button>
   <button class="tab" data-pane="story">② 小说朗读</button>
   <button class="tab" data-pane="board">③ 数据看板</button>
 </nav>
 
 <main>
+  <!-- ================= 📻 电台 ================= -->
+  <div class="pane active" id="pane-radio">
+    <section class="panel alert-card" id="rdAlertsPanel" hidden>
+      <h2>⚠ 危机提醒 <span class="alert-count" id="rdAlertCount">0</span></h2>
+      <p class="hint">有观众说了可能想伤害自己的话。大肥鱼已经播了固定安抚话术，请真人马上看一下，必要时接管、私信或提供热线。处理完点「已处理」。</p>
+      <ul class="alert-list" id="rdAlerts"></ul>
+      <div class="result" id="rdAlertResult"></div>
+    </section>
+
+    <div class="result warn" id="rdOffline">正在读取电台状态…</div>
+
+    <section class="panel">
+      <h2>状态</h2>
+      <div class="row">
+        <label>模式</label>
+        <button id="rdModeRadio">电台模式</button>
+        <button id="rdModeNovel">小说模式</button>
+        <span class="hint" id="rdModeState">—</span>
+      </div>
+      <div class="grid" id="rdStats"></div>
+      <div class="result" id="rdError"></div>
+      <div class="result" id="rdModeResult"></div>
+    </section>
+
+    <section class="panel">
+      <h2>真人接管</h2>
+      <div class="row">
+        <button id="rdPause" class="big-toggle" aria-pressed="false">真人接管（暂停 AI 自动说话）</button>
+        <button id="rdMute" class="danger">静音当前这句</button>
+      </div>
+      <p class="hint" id="rdPauseHint">接管后 AI 不再自动回弹幕、不冷场独白；弹幕照常进来，你可以用下面的框让大肥鱼说话。</p>
+      <textarea id="rdSayText" class="rd-say" placeholder="输入要说的话，会用大肥鱼的声音播出来（同样过词库）"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button id="rdSay" class="primary">让大肥鱼说这句</button>
+      </div>
+      <div class="result" id="rdTakeResult"></div>
+    </section>
+
+    <section class="panel">
+      <h2>话题</h2>
+      <div class="rd-topic" id="rdTopic">还没有话题</div>
+      <div class="row" style="margin-top:12px">
+        <input id="rdTopicText" placeholder="输入新话题，比如：那些没说出口的话" autocomplete="off" />
+        <button id="rdTopicSet" class="primary">设为当前话题</button>
+        <button id="rdTopicNext">换下一个话题</button>
+      </div>
+      <div class="result" id="rdTopicResult"></div>
+      <div class="field-label">话题墙（观众发「话题 XXX」投票）</div>
+      <ol id="rdWall" class="topic-list"></ol>
+    </section>
+
+    <section class="panel">
+      <h2>节奏与搜索</h2>
+      <div class="row">
+        <label for="rdTopicMin">换话题</label>
+        <input id="rdTopicMin" type="number" min="1" step="1" style="width:90px" /> 分钟一次
+      </div>
+      <div class="row">
+        <label for="rdNewMin">新人提醒</label>
+        每 <input id="rdNewMin" type="number" min="1" step="1" style="width:80px" /> –
+        <input id="rdNewMax" type="number" min="1" step="1" style="width:80px" /> 分钟一次
+      </div>
+      <div class="row">
+        <label for="rdIdleSec">冷场</label>
+        <input id="rdIdleSec" type="number" min="5" step="5" style="width:90px" /> 秒没弹幕就围绕话题说一段
+      </div>
+      <div class="row">
+        <label>联网搜索</label>
+        <label class="inline"><input id="rdSearch" type="checkbox" /> 允许大肥鱼联网搜索</label>
+        <label for="rdSearchPerHour" style="min-width:auto">每小时最多</label>
+        <input id="rdSearchPerHour" type="number" min="1" step="1" style="width:90px" /> 次
+      </div>
+      <div class="row">
+        <label>直播页面</label>
+        <label class="inline"><input id="rdShowFeed" type="checkbox" /> 页面显示弹幕列表</label>
+      </div>
+      <div class="row">
+        <button id="rdSaveRhythm" class="primary">保存</button>
+      </div>
+      <div class="result" id="rdRhythmResult"></div>
+    </section>
+
+    <section class="panel">
+      <h2>安全</h2>
+      <p class="hint">内置词库只覆盖最基础的敏感词，自己直播间常见的要再补。每行一个词；弹幕、搜索词、大肥鱼要说的每一句都会过这张表。</p>
+      <textarea id="rdBlockWords" class="rd-words" placeholder="每行一个词"></textarea>
+      <div class="row" style="margin-top:10px">
+        <label for="rdHotline">心理援助热线</label>
+        <input id="rdHotline" placeholder="12356" style="flex:0 0 200px" autocomplete="off" />
+        <button id="rdSaveSafety" class="primary">保存</button>
+        <span class="hint">开播前请自己核实热线号码是否可用</span>
+      </div>
+      <div class="result" id="rdSafetyResult"></div>
+    </section>
+  </div>
+
   <!-- ================= ① 基础设置 ================= -->
-  <div class="pane active" id="pane-basic">
+  <div class="pane" id="pane-basic">
+
 
     <section class="panel">
       <h2>接入 DeepSeek</h2>
@@ -160,6 +258,12 @@
         </label>
         <label style="min-width:auto">音色</label>
         <select id="voEngine" style="width:230px">
+          <optgroup label="Fish Audio（S2.1-Pro，默认免费档）">
+            <option value="fish:storyteller">Fish · 温柔叙事女声</option>
+            <option value="fish:jialan">Fish · 嘉岚（轻柔）</option>
+            <option value="fish:soothing">Fish · 温柔动听女声</option>
+            <option value="fish:lively">Fish · 活力女声</option>
+          </optgroup>
           <optgroup label="在线音色（快，需要联网）">
             <option value="minimax:cuteGirl">MiniMax · 软萌少女</option>
             <option value="minimax:lyrical">MiniMax · 中文抒情旁白</option>
@@ -194,6 +298,37 @@
         <span class="hint" id="voMinimaxKeyState" role="status">未配置</span>
       </div>
       <p class="hint">Key 只用于本机 MiniMax 合成；保存后不会在页面回显。若设置了 <code>MINIMAX_API_KEY</code> 环境变量，它优先于这里保存的 Key。</p>
+      <div class="row">
+        <label for="voFishKey">Fish Key</label>
+        <input id="voFishKey" type="password" placeholder="粘贴 Fish Audio API Key" autocomplete="new-password" />
+        <button id="saveFishKey" class="primary">保存 Key</button>
+        <span class="hint" id="voFishKeyState" role="status">未配置</span>
+      </div>
+      <div class="row">
+        <label for="voFishModel">Fish 模型</label>
+        <select id="voFishModel" style="width:170px">
+          <option value="s2.1-pro-free">s2.1-pro-free（免费）</option>
+          <option value="s2.1-pro">s2.1-pro（付费）</option>
+          <option value="s2-pro">s2-pro（付费）</option>
+        </select>
+        <label for="voFishVoice" style="min-width:auto">自定义音色 ID</label>
+        <input id="voFishVoice" placeholder="留空用上面选的音色" style="width:280px" />
+        <button id="saveFishVoice">保存</button>
+      </div>
+      <p class="hint">Fish 的 Key 在 fish.audio → 开发者 → API Keys 里生成。自定义音色 ID 是 fish.audio 音色页地址里那串 32 位编号，也可以填你自己克隆的音色。环境变量 <code>FISH_API_KEY</code> 优先。</p>
+      <div class="row">
+        <label for="voFishProxyMode">Fish 代理</label>
+        <select id="voFishProxyMode" style="width:230px">
+          <option value="system">跟随系统代理 / 环境变量</option>
+          <option value="custom">手动填写代理</option>
+          <option value="none">直连（不用代理）</option>
+        </select>
+        <input id="voFishProxy" placeholder="socks5://127.0.0.1:1080" style="flex:1;min-width:260px" />
+        <button id="saveFishProxy" class="primary">保存</button>
+        <button id="testFishProxy">测试连接</button>
+        <span class="hint" id="voFishProxyState" role="status"></span>
+      </div>
+      <p class="hint">连不上 Fish（提示 ETIMEDOUT、连接失败）时在这里填代理。支持 http、https、socks5、socks5h、socks4，带登录就写 <code>用户名:密码@</code>。「跟随系统代理」会读环境变量 HTTPS_PROXY / ALL_PROXY 和 Windows 的代理设置；本机能直接访问 Fish 时选「直连」。改完点「测试连接」验证。</p>
       <div class="row">
         <label>音色细节</label>
         <span class="hint" id="voName" style="flex:1;min-width:0"></span>
@@ -336,6 +471,6 @@
   </div>
 </main>
 
-<script src="/admin.js?v=20261103-1"></script>
+<script src="/admin.js?v=20261105-proxy"></script>
 </body>
 </html>

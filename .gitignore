@@ -28,3 +28,13 @@ voice-src/*.m4a
 DaisyWriter/
 短篇/
 music/voices.npz.bak
+
+# 生图原始产物、截图（成品已放进 public/assets/radio）
+media/
+shot.png
+
+# rig 构建中间产物与检查图（python tools/rig/build.py、check.py 可重新生成）
+tools/rig/_*
+tools/rig/bg_gen.png
+tools/rig/__pycache__/
+public/assets/radio/rig/_preview_base.png

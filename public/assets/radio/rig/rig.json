@@ -1,0 +1,40 @@
+{
+  "width": 1086,
+  "height": 1448,
+  "layers": {
+    "background": "bg.png",
+    "character": "char.png",
+    "foreground": "fg.png"
+  },
+  "pivot": {
+    "x": 590,
+    "y": 1010
+  },
+  "mouth": {
+    "box": {
+      "x": 512,
+      "y": 380,
+      "w": 92,
+      "h": 64
+    },
+    "frames": {
+      "closed": null,
+      "small": "mouth_small.png",
+      "mid": "mouth_mid.png",
+      "open": "mouth_open.png"
+    }
+  },
+  "eyes": {
+    "box": {
+      "x": 432,
+      "y": 276,
+      "w": 206,
+      "h": 120
+    },
+    "frames": {
+      "open": null,
+      "half": "eyes_half.png",
+      "closed": "eyes_closed.png"
+    }
+  }
+}

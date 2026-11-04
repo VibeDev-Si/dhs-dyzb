@@ -563,12 +563,14 @@ el.storyAudio.addEventListener('loadedmetadata', () => {
     const story = state.story;
     if (!story || story.phase !== 'reading') return;
     const a = el.storyAudio;
-    if (!a.duration || !bubble) return;
-    state.storyProgressRatio = Math.max(0, Math.min(1, a.currentTime / a.duration));
+    /* 流式音频还在合成时 duration 是 Infinity，先用服务端估的时长顶上 */
+    const total = Number.isFinite(a.duration) && a.duration > 0 ? a.duration : Number(story.audioMs || 0) / 1000;
+    if (!total || !bubble) return;
+    state.storyProgressRatio = Math.max(0, Math.min(1, a.currentTime / total));
     if (state.storyDisplayMode !== 'story' || a.currentTime < STORY_SCROLL_DELAY_SEC) return;
     const max = bubble.scrollHeight - bubble.clientHeight;
     if (max <= 0) return;
-    const denominator = Math.max(1, a.duration - STORY_SCROLL_DELAY_SEC);
+    const denominator = Math.max(1, total - STORY_SCROLL_DELAY_SEC);
     const ratio = Math.max(0, Math.min(1, (a.currentTime - STORY_SCROLL_DELAY_SEC) / denominator));
     bubble.scrollTop = ratio * max;
   });

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>御姐大肥鱼电台</title>
+  <link rel="stylesheet" href="/radio.css?v=20261105-4" />
+</head>
+<body>
+  <div class="stage" id="stage">
+    <!-- 背景：模糊垫底 + 主图（缓慢呼吸） + 暗角 -->
+    <div class="backdrop"><img id="backdropImg" src="/assets/radio/host.png" alt="" /></div>
+    <div class="hero" id="hero"><div class="hero-drift" id="heroDrift"><img class="hero-static" id="heroImg" src="/assets/radio/host.png" alt="大肥鱼" /></div></div>
+    <div class="tint" aria-hidden="true"><i class="t-dawn"></i><i class="t-morning"></i><i class="t-noon"></i><i class="t-afternoon"></i><i class="t-evening"></i><i class="t-late"></i><i class="t-small"></i></div>
+    <div class="shade"></div>
+    <div class="mic-glow" aria-hidden="true"></div>
+    <!-- 角色旁的小气泡：思考 / 查一查 / 找到了 -->
+    <div class="think" id="think" aria-hidden="true">
+      <span class="think-dots dots"><i></i><i></i><i></i></span>
+      <span class="think-search"><span class="glass-icon">🔍</span>查一查</span>
+      <span class="think-found">✨ 找到了</span>
+    </div>
+
+    <div class="upper">
+    <!-- 顶部：AI 标识（合规，常驻） -->
+    <div class="topline">
+      <div class="badge ai-badge">AI 虚拟主播 · 内容由 AI 生成</div>
+      <div class="badge paused-pill" id="pausedPill" hidden>真人主播在线</div>
+    </div>
+
+    <!-- 标题 -->
+    <header class="title">
+      <h1><span class="live-dot" aria-hidden="true"></span>御姐大肥鱼电台</h1>
+      <p class="subtitle" id="subtitle">深夜电台 · 树洞</p>
+    </header>
+
+    <!-- 话题条 + 前情 -->
+    <section class="topic glass">
+      <div class="topic-row">
+        <div class="topic-label">现在在聊</div>
+        <div class="topic-text" id="topicText">今晚随便聊聊</div>
+      </div>
+      <div class="topic-hook" id="topicHook">有什么心事，发弹幕告诉我</div>
+    </section>
+    <div class="recap" id="recap"><span class="recap-a"></span><span class="recap-b"></span></div>
+
+    <div class="middle">
+    <!-- 左栏：话题墙 + （可选）弹幕 -->
+    <aside class="leftcol">
+      <section class="wall glass" id="wall" hidden>
+        <div class="wall-title">话题墙 · 投票中</div>
+        <ol class="wall-list" id="wallList"></ol>
+        <div class="wall-hint">发「话题 + 内容」提议下一个话题</div>
+      </section>
+      <ul class="feed" id="feed" hidden></ul>
+    </aside>
+
+    <!-- 右栏：礼物 / 进场提示 -->
+    <div class="toasts" id="toasts"></div>
+    </div>
+    </div>
+
+    <div class="lower">
+    <!-- 正在播放 -->
+    <div class="music" id="musicLine">
+      <span class="now" id="nowPlaying" hidden></span>
+      <span class="song-hint">发「点歌 歌名」点一首</span>
+    </div>
+
+    <!-- 字幕气泡 -->
+    <section class="bubble glass" id="bubble" aria-live="polite">
+      <div class="quotes" id="quotes" hidden></div>
+      <div class="bubble-head">
+        <span class="who" id="bubbleWho">大肥鱼</span>
+        <span class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+      <div class="thinking" id="thinking" hidden><span id="thinkingLabel">大肥鱼正在想</span><span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="caption" id="caption">
+        <div class="caption-text" id="captionText"><span class="spoken" id="spoken"></span><span class="mark" id="mark"></span><span class="ghost" id="ghost"></span><span class="caret" id="caret" hidden></span></div>
+      </div>
+    </section>
+    </div>
+
+    <button class="unlock" id="soundUnlock" type="button" hidden>🔊 点一下，开启声音</button>
+  </div>
+
+  <audio id="voice" preload="auto"></audio>
+  <audio id="music" preload="auto"></audio>
+  <script src="/radio.js?v=20261105-4"></script>
+</body>
+</html>

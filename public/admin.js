@@ -108,6 +108,7 @@
       setConn(true, '服务已连接');
       fillConfig(d.config);
       fillNovel(d.config, d.story);
+      fillRadioConfig(d.config);
       const st = { ...d.stats };
       st.__balance = d.balance && typeof d.balance.total === 'number' ? money(d.balance.total) : '—';
       render(d.config, st);
@@ -546,9 +547,9 @@
   };
 
   /* ---------- 三个分区 ---------- */
-  const TABS = ['basic', 'story', 'board'];
+  const TABS = ['radio', 'basic', 'story', 'board'];
   function switchTab(name) {
-    if (!TABS.includes(name)) name = 'basic';
+    if (!TABS.includes(name)) name = 'radio';
     document.querySelectorAll('.tab').forEach((b) => b.classList.toggle('active', b.dataset.pane === name));
     document.querySelectorAll('.pane').forEach((p) => p.classList.toggle('active', p.id === `pane-${name}`));
     try {
@@ -557,6 +558,7 @@
       /* 隐私模式无所谓 */
     }
     window.scrollTo({ top: 0 });
+    if (name === 'radio') loadRadio();
   }
   document.querySelectorAll('.tab').forEach((b) => {
     b.onclick = () => switchTab(b.dataset.pane);
@@ -566,6 +568,10 @@
   const pct = (v) => `${Math.round(Number(v) * 100)}%`;
   const VOICE_ENGINES = {
     'sapi:sapi': { engine: 'sapi', preset: '' },
+    'fish:storyteller': { engine: 'fish', preset: 'storyteller' },
+    'fish:jialan': { engine: 'fish', preset: 'jialan' },
+    'fish:soothing': { engine: 'fish', preset: 'soothing' },
+    'fish:lively': { engine: 'fish', preset: 'lively' },
     'minimax:cuteGirl': { engine: 'minimax', preset: 'cuteGirl' },
     'minimax:lyrical': { engine: 'minimax', preset: 'lyrical' },
     'edge:natural': { engine: 'edge', preset: 'natural' },
@@ -587,19 +593,118 @@
     $('voRate').value = String(v.rate ?? 1);
     const key = `${v.engine || 'edge'}:${v.engine === 'sapi' ? 'sapi' : v.preset || 'natural'}`;
     if (VOICE_ENGINES[key]) $('voEngine').value = key;
-    const preset = v.engine === 'kokoro'
-      ? (v.kokoro || {})[v.preset]
-      : v.engine === 'minimax'
-        ? (v.minimax || {})[v.preset]
-        : (v.presets || {})[v.preset];
+    const table = { kokoro: v.kokoro, minimax: v.minimax, fish: v.fish }[v.engine] || v.presets;
+    const preset = (table || {})[v.preset];
+    const noKey =
+      (v.engine === 'minimax' && v.minimaxHasKey === false) || (v.engine === 'fish' && v.fishHasKey === false);
+    const fishTail = v.engine === 'fish' ? ` · ${v.fishModel || 's2.1-pro-free'}${v.fishVoice ? ' · 自定义音色' : ''}` : '';
     const label =
       v.engine === 'sapi'
         ? `系统语音 · ${v.name || 'Huihui'}`
-        : `${preset?.label || v.preset || ''} · ${preset?.voiceId || preset?.voice || v.name || ''}${preset?.note ? ` · ${preset.note}` : ''}${v.engine === 'minimax' && v.minimaxHasKey === false ? ' · 未配置 API Key' : ''}`;
+        : `${preset?.label || v.preset || ''} · ${v.engine === 'fish' && v.fishVoice ? v.fishVoice : preset?.voiceId || preset?.voice || v.name || ''}${fishTail}${preset?.note ? ` · ${preset.note}` : ''}${noKey ? ' · 未配置 API Key' : ''}`;
     $('voName').textContent = label;
     paintMinimaxKeyState(v.minimaxHasKey);
+    paintKeyState('voFishKeyState', v.fishHasKey);
+    if (v.fishModel) $('voFishModel').value = v.fishModel;
+    if (document.activeElement !== $('voFishVoice')) $('voFishVoice').value = v.fishVoice || '';
+    paintFishProxy(v.fishProxy);
     if (v.lastError) $('voResult').textContent = `上次出错：${v.lastError}`;
   }
+
+  /** Fish 代理：模式 + 地址 + 当前实际生效的是哪条 */
+  function paintFishProxy(p) {
+    if (!p) return;
+    if (document.activeElement !== $('voFishProxyMode')) $('voFishProxyMode').value = p.mode || 'system';
+    if (document.activeElement !== $('voFishProxy')) $('voFishProxy').value = p.url || '';
+    $('voFishProxy').disabled = (p.mode || 'system') !== 'custom';
+    const state = $('voFishProxyState');
+    if (p.error) {
+      state.textContent = p.error;
+      state.classList.add('warn');
+      return;
+    }
+    state.classList.remove('warn');
+    state.textContent = p.effective ? `当前走：${p.effective}（${p.source}）` : `当前直连（${p.source}）`;
+  }
+
+  async function saveFishProxy() {
+    const mode = $('voFishProxyMode').value;
+    const state = $('voFishProxyState');
+    state.classList.remove('warn');
+    state.textContent = '正在保存…';
+    try {
+      await api('/api/config', { patch: { voice: { fishProxyMode: mode, fishProxy: $('voFishProxy').value.trim() } } });
+      await loadVoice();
+    } catch (e) {
+      state.textContent = `保存失败：${e.message}`;
+      state.classList.add('warn');
+    }
+  }
+  $('voFishProxyMode').onchange = () => {
+    $('voFishProxy').disabled = $('voFishProxyMode').value !== 'custom';
+    saveFishProxy();
+  };
+  $('saveFishProxy').onclick = () => saveFishProxy();
+  $('testFishProxy').onclick = async () => {
+    const state = $('voFishProxyState');
+    const button = $('testFishProxy');
+    button.disabled = true;
+    state.classList.remove('warn');
+    state.textContent = '正在测试…';
+    try {
+      const d = await api('/api/voice/fish-proxy-test', {
+        mode: $('voFishProxyMode').value,
+        url: $('voFishProxy').value.trim(),
+      });
+      if (d.ok) {
+        state.textContent = `连上了：${d.proxy || '直连'} · ${d.ms}ms${d.status ? ` · HTTP ${d.status}` : ''}`;
+      } else {
+        state.textContent = `连不上：${d.error || '未知错误'}${d.hint ? ` ${d.hint}` : ''}`;
+        state.classList.add('warn');
+      }
+    } catch (e) {
+      state.textContent = `测试失败：${e.message}`;
+      state.classList.add('warn');
+    } finally {
+      button.disabled = false;
+    }
+  };
+
+  function paintKeyState(id, hasKey) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = hasKey ? '已配置（输入框不会回显）' : '未配置';
+    el.classList.toggle('warn', !hasKey);
+  }
+
+  $('saveFishKey').onclick = async () => {
+    const key = $('voFishKey').value.trim();
+    if (!key) {
+      $('voFishKeyState').textContent = '请输入 Key；留空不会覆盖已有配置';
+      $('voFishKeyState').classList.add('warn');
+      return;
+    }
+    $('saveFishKey').disabled = true;
+    try {
+      await api('/api/config', { patch: { voice: { fishApiKey: key } } });
+      $('voFishKey').value = '';
+      await loadVoice();
+    } catch (e) {
+      $('voFishKeyState').textContent = `保存失败：${e.message}`;
+      $('voFishKeyState').classList.add('warn');
+    } finally {
+      $('saveFishKey').disabled = false;
+    }
+  };
+
+  async function saveFish() {
+    await api('/api/config', {
+      patch: { voice: { fishModel: $('voFishModel').value, fishVoice: $('voFishVoice').value.trim() } },
+    });
+    await loadVoice();
+  }
+  $('voFishModel').onchange = () => saveFish();
+  $('saveFishVoice').onclick = () => saveFish();
 
   function paintMinimaxKeyState(hasKey) {
     const el = $('voMinimaxKeyState');
@@ -683,6 +788,10 @@
         $('voResult').textContent = d.cached
           ? `试听中（${detail} · 缓存命中）`
           : `试听中（${detail} · 合成 ${d.ms}ms）`;
+      } else if (d.engine === 'fish') {
+        $('voResult').textContent = d.cached
+          ? `试听中（Fish · ${d.model} · 缓存命中）`
+          : `试听中（Fish · ${d.model}${d.streaming ? ` · 流式，${d.ms}ms 出第一块声音` : ` · 合成 ${d.ms}ms`}）`;
       } else {
         $('voResult').textContent = d.cached
           ? `试听中（缓存命中：${d.url}）`
@@ -994,12 +1103,364 @@
     }
   }
 
+  /* ---------- 📻 电台 ---------- */
+  const RADIO_DEFAULTS = {
+    topicMin: 10, newcomerMinMin: 5, newcomerMaxMin: 8, idleSec: 45,
+    search: true, searchPerHour: 30, showFeed: false, blockWords: [], crisisHotline: '12356',
+  };
+  const RADIO_RHYTHM_IDS = ['rdTopicMin', 'rdNewMin', 'rdNewMax', 'rdIdleSec', 'rdSearch', 'rdSearchPerHour', 'rdShowFeed'];
+  const RADIO_SAFETY_IDS = ['rdBlockWords', 'rdHotline'];
+  const RADIO_BUTTONS = ['rdPause', 'rdMute', 'rdSay', 'rdTopicSet', 'rdTopicNext'];
+  let radioView = null;
+  let radioOnline = null; // null = 还没问过，true/false = 上一次的结果
+  let radioLoading = false;
+  let rhythmDirty = false;
+  let safetyDirty = false;
+  let lastAlertsKey = '';
+  let lastWallKey = '';
+  const baseTitle = document.title;
+
+  function showResult(id, text, warn) {
+    const el = $(id);
+    el.className = 'result show' + (warn ? ' warn' : '');
+    el.textContent = text;
+  }
+  function clockTime(ts) {
+    return ts ? new Date(ts).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  }
+  function span(ms) {
+    const min = Math.max(0, Math.floor(ms / 60000));
+    if (min < 1) return '不到 1 分钟';
+    if (min < 60) return `${min} 分钟`;
+    return `${Math.floor(min / 60)} 小时 ${min % 60} 分钟`;
+  }
+
+  async function loadRadio() {
+    if (radioLoading) return;
+    radioLoading = true;
+    try {
+      const res = await fetch('/api/radio', { cache: 'no-store' });
+      if (res.status === 404) return paintRadioOffline('电台后端还没启动（/api/radio 还不存在），下面的按钮暂时用不了。');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.ok === false || !data.radio) {
+        return paintRadioOffline(`电台状态读取失败：${data.error || `HTTP ${res.status}`}`);
+      }
+      paintRadio(data.radio);
+    } catch {
+      paintRadioOffline('连不上服务，电台状态读不到。');
+    } finally {
+      radioLoading = false;
+    }
+  }
+
+  function setRadioButtons(enabled) {
+    RADIO_BUTTONS.forEach((id) => {
+      $(id).disabled = !enabled;
+    });
+  }
+
+  function paintRadioOffline(msg) {
+    radioOnline = false;
+    $('rdOffline').className = 'result show warn';
+    $('rdOffline').textContent = msg;
+    setRadioButtons(false);
+    $('rdStats').innerHTML = '<div class="kv"><span>电台</span><b>—</b></div>';
+    // 危机提醒保留上一次看到的，别因为一次断线就消失
+  }
+
+  function paintRadio(r) {
+    radioView = r;
+    radioOnline = true;
+    $('rdOffline').className = 'result';
+    setRadioButtons(true);
+    if (r.mode) paintMode(r.mode);
+    paintRadioStatus(r);
+    paintPause(Boolean(r.paused));
+    paintTopic(r.topic);
+    paintWall(r.wall || []);
+    paintAlerts(r.alerts || []);
+  }
+
+  function paintMode(mode) {
+    const isRadio = mode !== 'novel';
+    $('rdModeRadio').classList.toggle('primary', isRadio);
+    $('rdModeNovel').classList.toggle('primary', !isRadio);
+    $('rdModeState').textContent = isRadio
+      ? '当前：电台模式（直播页是竖屏电台）'
+      : '当前：小说模式（直播页是旧的小说朗读页）';
+  }
+
+  function paintRadioStatus(r) {
+    const doing = r.paused ? '真人接管中' : r.speaking ? '正在说话' : r.busy ? '正在想 / 生成' : '安静等弹幕';
+    const s = r.search || {};
+    const searchText = s.enabled === false ? '已关闭' : `${int(s.today)} 次 / 每小时上限 ${int(s.perHour)}`;
+    $('rdStats').innerHTML = [
+      ['大肥鱼', doing],
+      ['说话', r.speaking ? '是' : '否'],
+      ['生成中', r.busy ? '是' : '否'],
+      ['AI 自动说话', r.paused ? '已暂停' : '开着'],
+      ['今天搜索', searchText],
+    ]
+      .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${escapeHtml(v)}</b></div>`)
+      .join('');
+    if (r.lastError) showResult('rdError', `最近一次出错：${r.lastError}`, true);
+    else $('rdError').className = 'result';
+  }
+
+  function paintPause(paused) {
+    const btn = $('rdPause');
+    btn.classList.toggle('on', paused);
+    btn.setAttribute('aria-pressed', String(paused));
+    btn.textContent = paused ? '● 真人接管中 · 点这里交还 AI' : '真人接管（暂停 AI 自动说话）';
+  }
+
+  const TOPIC_SOURCES = { ai: 'AI 抛的', wall: '观众投票', vote: '观众投票', viewer: '观众投票', admin: '操作台设的', host: '操作台设的', manual: '操作台设的' };
+  function paintTopic(t) {
+    const box = $('rdTopic');
+    if (!t || !t.text) {
+      box.innerHTML = '<span class="hint">还没有话题。可以在下面手动设一个，或等 AI 自己抛。</span>';
+      return;
+    }
+    const src = t.source ? TOPIC_SOURCES[t.source] || t.source : '';
+    const meta = [t.since ? `已聊 ${span(Date.now() - t.since)}` : '', src].filter(Boolean).join(' · ');
+    box.innerHTML =
+      `<div class="rd-topic-text">今晚在聊：${escapeHtml(t.text)}</div>` +
+      (t.hook ? `<div class="rd-topic-hook">${escapeHtml(t.hook)}</div>` : '') +
+      (meta ? `<div class="hint" style="margin:4px 0 0">${escapeHtml(meta)}</div>` : '');
+  }
+
+  function paintWall(wall) {
+    const key = JSON.stringify(wall);
+    if (key === lastWallKey) return;
+    lastWallKey = key;
+    const ol = $('rdWall');
+    if (!wall.length) {
+      ol.innerHTML = '<li class="hint">还没有人投。弹幕里发「话题 XXX」就会上墙。</li>';
+      return;
+    }
+    ol.innerHTML = wall
+      .map((w) => {
+        const users = (w.users || []).slice(0, 4).map(escapeHtml).join('、');
+        return `<li><b>${int(w.count)}</b> 票 · ${escapeHtml(w.text)}${users ? ` <span class="hint">（${users}）</span>` : ''}</li>`;
+      })
+      .join('');
+  }
+
+  function paintAlerts(alerts) {
+    const n = alerts.length;
+    const badge = $('rdTabBadge');
+    badge.hidden = n === 0;
+    badge.textContent = String(n);
+    document.title = n ? `(${n}) ⚠ ${baseTitle}` : baseTitle;
+    $('rdAlertsPanel').hidden = n === 0;
+    $('rdAlertCount').textContent = String(n);
+    const key = JSON.stringify(alerts);
+    if (key === lastAlertsKey) return; // 内容没变就不重画，免得把正要点的按钮换掉
+    lastAlertsKey = key;
+    $('rdAlerts').innerHTML = alerts
+      .map(
+        (a) =>
+          `<li><div class="alert-head"><b>${escapeHtml(a.username || '某位观众')}</b><span class="time">${escapeHtml(clockTime(a.at))}</span></div>` +
+          `<div class="alert-text">${escapeHtml(a.text)}</div>` +
+          `<button class="primary" data-alert-id="${escapeHtml(a.id)}">已处理</button></li>`,
+      )
+      .join('');
+  }
+
+  // 动作接口的回包格式文档没写死：带 radio 就直接画，否则重新拉一次
+  async function afterRadioAction(d) {
+    if (d && d.radio) paintRadio(d.radio);
+    else await loadRadio();
+  }
+
+  $('rdAlerts').onclick = async (ev) => {
+    const btn = ev.target.closest('button[data-alert-id]');
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      const d = await api('/api/radio/alerts/clear', { id: btn.dataset.alertId });
+      $('rdAlertResult').className = 'result';
+      await afterRadioAction(d);
+    } catch (err) {
+      btn.disabled = false;
+      showResult('rdAlertResult', '标记失败：' + err.message, true);
+    }
+  };
+
+  $('rdPause').onclick = async () => {
+    const paused = !(radioView && radioView.paused);
+    $('rdPause').disabled = true;
+    try {
+      const d = await api('/api/radio/pause', { paused });
+      showResult('rdTakeResult', paused ? '已接管：AI 不会再自动说话。' : '已交还 AI，大肥鱼会继续自动回弹幕。');
+      if (radioView) radioView.paused = paused;
+      paintPause(paused);
+      await afterRadioAction(d);
+    } catch (err) {
+      showResult('rdTakeResult', '切换失败：' + err.message, true);
+    } finally {
+      $('rdPause').disabled = radioOnline === false;
+    }
+  };
+
+  $('rdMute').onclick = async () => {
+    try {
+      const d = await api('/api/radio/mute', {});
+      showResult('rdTakeResult', '已静音当前这句。');
+      await afterRadioAction(d);
+    } catch (err) {
+      showResult('rdTakeResult', '静音失败：' + err.message, true);
+    }
+  };
+
+  $('rdSay').onclick = async () => {
+    const text = $('rdSayText').value.trim();
+    if (!text) return showResult('rdTakeResult', '先写好要说的话。', true);
+    $('rdSay').disabled = true;
+    try {
+      const d = await api('/api/radio/say', { text });
+      $('rdSayText').value = '';
+      showResult('rdTakeResult', '已交给大肥鱼，马上播。');
+      await afterRadioAction(d);
+    } catch (err) {
+      showResult('rdTakeResult', '没说出去：' + err.message, true);
+    } finally {
+      $('rdSay').disabled = radioOnline === false;
+    }
+  };
+
+  $('rdTopicSet').onclick = async () => {
+    const text = $('rdTopicText').value.trim();
+    if (!text) return showResult('rdTopicResult', '先输入话题。', true);
+    try {
+      const d = await api('/api/radio/topic', { text });
+      $('rdTopicText').value = '';
+      showResult('rdTopicResult', `当前话题已设为：${text}`);
+      await afterRadioAction(d);
+    } catch (err) {
+      showResult('rdTopicResult', '设置失败：' + err.message, true);
+    }
+  };
+
+  $('rdTopicNext').onclick = async () => {
+    try {
+      const d = await api('/api/radio/topic', { next: true });
+      showResult('rdTopicResult', '已换到下一个话题。');
+      await afterRadioAction(d);
+    } catch (err) {
+      showResult('rdTopicResult', '换话题失败：' + err.message, true);
+    }
+  };
+
+  async function setMode(mode) {
+    if (mode === 'novel' && !confirm('切回小说模式？直播页会换成旧的小说朗读页面。')) return;
+    try {
+      const d = await api('/api/config', { patch: { mode } });
+      paintMode(d.config?.mode || mode);
+      showResult('rdModeResult', mode === 'novel' ? '已切到小说模式。' : '已切到电台模式。');
+      await loadRadio();
+    } catch (err) {
+      showResult('rdModeResult', '切换失败：' + err.message, true);
+    }
+  }
+  $('rdModeRadio').onclick = () => setMode('radio');
+  $('rdModeNovel').onclick = () => setMode('novel');
+
+  /* 每 4 秒 refresh() 都会带新配置进来：改到一半（dirty）的那一块不覆盖 */
+  function fillRadioConfig(c) {
+    if (!c) return;
+    if (!radioOnline || !radioView?.mode) paintMode(c.mode || 'radio');
+    const r = { ...RADIO_DEFAULTS, ...(c.radio || {}) };
+    if (!rhythmDirty) {
+      $('rdTopicMin').value = r.topicMin;
+      $('rdNewMin').value = r.newcomerMinMin;
+      $('rdNewMax').value = r.newcomerMaxMin;
+      $('rdIdleSec').value = r.idleSec;
+      $('rdSearch').checked = r.search !== false;
+      $('rdSearchPerHour').value = r.searchPerHour;
+      $('rdShowFeed').checked = Boolean(r.showFeed);
+    }
+    if (!safetyDirty) {
+      $('rdBlockWords').value = (Array.isArray(r.blockWords) ? r.blockWords : []).join('\n');
+      $('rdHotline').value = r.crisisHotline || RADIO_DEFAULTS.crisisHotline;
+    }
+  }
+  RADIO_RHYTHM_IDS.forEach((id) => $(id).addEventListener('input', () => (rhythmDirty = true)));
+  RADIO_RHYTHM_IDS.forEach((id) => $(id).addEventListener('change', () => (rhythmDirty = true)));
+  RADIO_SAFETY_IDS.forEach((id) => $(id).addEventListener('input', () => (safetyDirty = true)));
+
+  function readPositive(id, label, integer) {
+    const raw = $(id).value.trim();
+    const n = Number(raw);
+    if (!raw || !Number.isFinite(n) || n <= 0) throw new Error(`${label}要填大于 0 的数字`);
+    if (integer && !Number.isInteger(n)) throw new Error(`${label}要填整数`);
+    return n;
+  }
+
+  $('rdSaveRhythm').onclick = async () => {
+    let radio;
+    try {
+      radio = {
+        topicMin: readPositive('rdTopicMin', '换话题间隔'),
+        newcomerMinMin: readPositive('rdNewMin', '新人提醒最短间隔'),
+        newcomerMaxMin: readPositive('rdNewMax', '新人提醒最长间隔'),
+        idleSec: readPositive('rdIdleSec', '冷场秒数', true),
+        search: $('rdSearch').checked,
+        searchPerHour: readPositive('rdSearchPerHour', '每小时搜索上限', true),
+        showFeed: $('rdShowFeed').checked,
+      };
+      if (radio.newcomerMinMin > radio.newcomerMaxMin) throw new Error('新人提醒的最短间隔不能比最长间隔大');
+    } catch (err) {
+      return showResult('rdRhythmResult', err.message, true);
+    }
+    try {
+      const d = await api('/api/config', { patch: { radio } });
+      rhythmDirty = false;
+      fillRadioConfig(d.config);
+      showResult('rdRhythmResult', '节奏与搜索设置已保存。');
+    } catch (err) {
+      showResult('rdRhythmResult', '保存失败：' + err.message, true);
+    }
+  };
+
+  $('rdSaveSafety').onclick = async () => {
+    const seen = new Set();
+    const blockWords = [];
+    for (const line of $('rdBlockWords').value.split(/\r?\n/)) {
+      const w = line.trim();
+      if (w && !seen.has(w)) {
+        seen.add(w);
+        blockWords.push(w);
+      }
+    }
+    const crisisHotline = $('rdHotline').value.trim() || RADIO_DEFAULTS.crisisHotline;
+    try {
+      const d = await api('/api/config', { patch: { radio: { blockWords, crisisHotline } } });
+      safetyDirty = false;
+      fillRadioConfig(d.config);
+      showResult('rdSafetyResult', `已保存：自定义词 ${blockWords.length} 个，热线 ${crisisHotline}。`);
+    } catch (err) {
+      showResult('rdSafetyResult', '保存失败：' + err.message, true);
+    }
+  };
+
+  // 电台页可见时每 2 秒拉一次；在别的分区或页面在后台时放慢到 6 秒，危机提醒的角标照样会亮
+  let radioTick = 0;
+  setInterval(() => {
+    radioTick += 1;
+    const onRadio = $('pane-radio').classList.contains('active') && document.visibilityState === 'visible';
+    if (onRadio || radioTick % 3 === 0) loadRadio();
+  }, 2000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') loadRadio();
+  });
+
   setInterval(loadDanmaku, 5000);
 
   try {
-    switchTab(localStorage.getItem('dfy.admin.tab') || 'basic');
+    switchTab(localStorage.getItem('dfy.admin.tab') || 'radio');
   } catch {
-    switchTab('basic');
+    switchTab('radio');
   }
   loadMusic();
   loadVoice();

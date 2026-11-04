@@ -5,14 +5,15 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { ROOT, loadConfig, getConfig, updateConfig, saveConfig, publicConfig, assertPatch } from './lib/config.mjs';
+import { ROOT, loadConfig, getConfig, updateConfig, saveConfig, publicConfig, assertPatch, resolveProxySubmit } from './lib/config.mjs';
 import { initStore, getState, getLifetime, recordEvent, addAiUsage, addAiEvent, addUsageOnly, pushPlaylist, nextSong, setCurrentSong, patchCurrentSong, addEventOnly, resetDay, flush, scheduleSave } from './lib/store.mjs';
 import { beijing, isPeak, ratesFor, costOf } from './lib/pricing.mjs';
 import { chatCompletion, fetchBalance } from './lib/ai.mjs';
 import { buildMessages, commandReply } from './lib/persona.mjs';
 import { DanmakuBridge } from './lib/cortico.mjs';
 import { resolveTrack, listLocal, findById, trackPath, musicDir, search as musicSearch, clearCache as clearMusicCache, neteaseMember, neteaseCookieOf, takeResolveReason } from './lib/music.mjs';
-import { synthesize, listVoices, voiceMediaPath, EDGE_PRESETS, KOKORO_PRESETS, MINIMAX_PRESETS } from './lib/voice.mjs';
+import { synthesize, listVoices, voiceMediaPath, EDGE_PRESETS, KOKORO_PRESETS, MINIMAX_PRESETS, FISH_PRESETS, FISH_MODELS, getFishStream, pipeFishStream, testFishConnection } from './lib/voice.mjs';
+import { resolveProxy, maskProxy } from './lib/proxy.mjs';
 import {
   initNovel,
   saveNovel,
@@ -52,8 +53,10 @@ import {
   setAudioMs,
   setDisplayMode,
 } from './lib/novel.mjs';
+import * as radio from './lib/radio.mjs';
 
 const PUBLIC_DIR = path.join(ROOT, 'public');
+const isRadio = () => (getConfig().mode || 'radio') === 'radio';
 const PORT = Number(process.env.PORT || 8787);
 
 await loadConfig();
@@ -197,12 +200,20 @@ let voiceError = null;
 /** 合成用的参数：各引擎共用 rate/preset，MiniMax 额外读取专属配置 */
 function voiceOptsOf(cfg, extra = {}) {
   const v = cfg.voice || {};
-  const engine = ['edge', 'kokoro', 'minimax'].includes(v.engine) ? v.engine : 'sapi';
+  const engine = ['edge', 'kokoro', 'minimax', 'fish'].includes(v.engine) ? v.engine : 'sapi';
+  const defaultPreset = { kokoro: 'xiaobei', minimax: 'lyrical', fish: 'storyteller' }[engine] || 'natural';
   return {
     engine,
     rate: v.rate ?? 1,
     voice: v.voice || undefined,
-    preset: v.preset || (engine === 'kokoro' ? 'xiaobei' : engine === 'minimax' ? 'lyrical' : 'natural'),
+    preset: v.preset || defaultPreset,
+    fishModel: v.fishModel || undefined,
+    fishVoice: v.fishVoice || undefined,
+    fishTemperature: v.fishTemperature ?? undefined,
+    fishProxyMode: v.fishProxyMode || 'system',
+    fishProxy: v.fishProxy || '',
+    fishStream: v.fishStream !== false,
+    fishApiKey: v.fishApiKey || undefined,
     speed: v.speed ?? undefined,
     minimaxVoice: v.minimaxVoice || undefined,
     minimaxModel: v.minimaxModel || undefined,
@@ -305,6 +316,11 @@ function sleep(ms) {
 
 function scheduleReply(job) {
   const cfg = getConfig();
+  // 电台模式：点歌/切歌这类固定回复交给电台按节拍念，普通弹幕在 handleIncoming 里已经交给电台
+  if (isRadio()) {
+    if (job.kind === 'command') radio.enqueueFixed(job.text || commandReply(job.command, job.payload || {}));
+    return;
+  }
   // 同一用户短时间内的连续发言只回最后一条
   const idx = replyQueue.findIndex((j) => j.username === job.username);
   if (idx >= 0) replyQueue.splice(idx, 1);
@@ -613,8 +629,14 @@ function handleIncoming(body) {
   const ev = recordEvent({ ...item, ts: body.ts });
   pushEvent(ev);
 
+  if (isRadio()) {
+    if (ev.kind === 'enter') radio.onEnter(ev.username);
+    else if (ev.kind === 'gift' && cfg.ai.replyToGifts !== false) radio.onGift(ev.username, ev.gift);
+    else if (ev.kind === 'like' || ev.kind === 'follow') radio.onActivity();
+  }
+
   if (ev.kind === 'chat') {
-    const displayMode = parseStoryDisplayCommand(ev.text);
+    const displayMode = isRadio() ? null : parseStoryDisplayCommand(ev.text);
     const topic = parseTopicCommand(ev.text);
     const title = parseSongCommand(ev.text);
     if (displayMode) {
@@ -662,6 +684,10 @@ function handleIncoming(body) {
           scheduleReply({ kind: 'command', username: ev.username, text: songReplyText(song.title, true) });
         })();
       }
+    } else if (isRadio()) {
+      // 电台：「话题 XXX」、心事、提问都交给电台（词库检查、危机提醒、话题墙都在 radio.mjs）
+      if (cfg.reply.auto && cfg.ai.enabled !== false) radio.onChat({ username: ev.username, text: ev.text });
+      else radio.onActivity();
     } else if (topic) {
       const item = addTopic(topic, ev.username);
       broadcastNovel();
@@ -830,7 +856,7 @@ function scheduleNovel(delay) {
   clearTimeout(novelTimer);
   novelTimer = null;
   const cfg = getConfig();
-  if (!cfg.novel?.enabled || !cfg.novel?.auto || novelBusy) return;
+  if (isRadio() || !cfg.novel?.enabled || !cfg.novel?.auto || novelBusy) return;
   novelTimer = setTimeout(() => {
     novelStep().catch((err) => console.warn('[novel]', err.message));
   }, Math.min(Math.max(400, delay ?? 600), 60 * 60_000));
@@ -903,7 +929,7 @@ async function announceSoon(cfg, at) {
 /** 每分钟看一眼：到点提醒 / 到点开讲 */
 async function storyScheduleTick() {
   const cfg = getConfig();
-  if (!cfg.novel?.enabled) return;
+  if (isRadio() || !cfg.novel?.enabled) return;
   /* 没设时间就按默认 17:00（页面也显示这个） */
   const at = nextStartMs(cfg);
   if (!at) return;
@@ -938,6 +964,18 @@ async function storyScheduleTick() {
 async function synthChapter(cfg, ch) {
   const say = `${spokenTitle(ch.title)}。\n${speechOf(ch.text)}`;
   const out = await synthesize(say, voiceOptsOf(cfg, { maxChars: 40000 }));
+  if (out.streaming) {
+    console.log(`[voice] Fish 流式：${out.ms}ms 出第一块音频，边合成边念`);
+    // 流结束后按字节数算出真实时长，让看门狗和纸面滚动用准确的数字
+    out.finished?.then((r) => {
+      if (r?.ms && getNovel()?.audioUrl === out.url) {
+        setAudioMs(r.ms);
+        if (getNovel()?.phase === 'reading') scheduleNovel(watchdogDelay());
+        broadcastNovel();
+      }
+      if (r?.error) console.warn('[voice] Fish 流式中断：', r.error);
+    });
+  }
   return out.url || '';
 }
 
@@ -1237,7 +1275,9 @@ async function streamFile(req, res, file) {
 
 async function serveStatic(req, res, urlPath) {
   let rel = decodeURIComponent(urlPath.split('?')[0]);
-  if (rel === '/' || rel === '') rel = '/index.html';
+  if (rel === '/' || rel === '') rel = isRadio() ? '/radio.html' : '/index.html';
+  if (rel === '/radio' || rel === '/radio/') rel = '/radio.html';
+  if (rel === '/novel' || rel === '/classic') rel = '/index.html';
   if (rel === '/admin' || rel === '/admin/') rel = '/admin.html';
   const file = path.join(PUBLIC_DIR, rel);
   if (!file.startsWith(PUBLIC_DIR)) {
@@ -1300,6 +1340,7 @@ const server = createServer(async (req, res) => {
         events: getState().events.slice(-50).map(eventView),
         story: storyView(getConfig()),
         danmaku: danmakuView(),
+        radio: radio.radioView(),
         aiError: aiLastError,
         serverTime: Date.now(),
       });
@@ -1352,6 +1393,7 @@ const server = createServer(async (req, res) => {
         events: getState().events.slice(-50).map(eventView),
         story: storyView(getConfig()),
         danmaku: danmakuView(),
+        radio: radio.radioView(),
         aiError: aiLastError,
         serverTime: Date.now(),
       });
@@ -1572,6 +1614,16 @@ const server = createServer(async (req, res) => {
           minimaxHasKey: Boolean(process.env.MINIMAX_API_KEY || cfg.voice?.minimaxApiKey),
           minimaxModel: cfg.voice?.minimaxModel || 'speech-2.8-hd',
           minimaxVoice: cfg.voice?.minimaxVoice || MINIMAX_PRESETS.lyrical.voiceId,
+          fish: FISH_PRESETS,
+          fishModels: FISH_MODELS,
+          fishHasKey: Boolean(process.env.FISH_API_KEY || cfg.voice?.fishApiKey),
+          fishModel: cfg.voice?.fishModel || 's2.1-pro-free',
+          fishVoice: cfg.voice?.fishVoice || '',
+          fishProxy: (() => {
+            const setting = { mode: cfg.voice?.fishProxyMode || 'system', url: cfg.voice?.fishProxy || '' };
+            const r = resolveProxy(setting);
+            return { mode: setting.mode, url: maskProxy(setting.url), effective: maskProxy(r.url), source: r.source, error: r.error || '' };
+          })(),
           lastError: voiceError,
         },
       });
@@ -1586,6 +1638,17 @@ const server = createServer(async (req, res) => {
         voiceError = e.message;
         return json(res, 500, { ok: false, error: e.message });
       }
+    }
+
+    /* 测 Fish 能不能连上：可以带还没保存的代理设置先试，不传就用已保存的 */
+    if (p === '/api/voice/fish-proxy-test' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const v = getConfig().voice || {};
+      const mode = body.mode || v.fishProxyMode || 'system';
+      const submitted = resolveProxySubmit(String(body.url ?? v.fishProxy ?? '').trim(), v.fishProxy);
+      if (submitted.error && body.url !== undefined) return json(res, 400, { ok: false, error: submitted.error });
+      const r = await testFishConnection({ mode, url: submitted.url || '' });
+      return json(res, 200, r);
     }
 
     if (p === '/api/voice/say' && req.method === 'POST') {
@@ -1630,6 +1693,33 @@ const server = createServer(async (req, res) => {
 
     if (p === '/api/audio/status' && req.method === 'GET') {
       return json(res, 200, { ok: true, last: sysVolLast, at: sysVolAt });
+    }
+
+    // ---- 御姐大肥鱼电台 ----
+    if (p === '/api/radio' && req.method === 'GET') return json(res, 200, { ok: true, radio: radio.radioView() });
+    if (p.startsWith('/api/radio/') && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const action = p.slice('/api/radio/'.length);
+      let r;
+      if (action === 'topic') r = body.next ? radio.nextTopic() : radio.setTopic(body.text);
+      else if (action === 'pause') r = await radio.setPaused(body.paused);
+      else if (action === 'mute') r = radio.mute();
+      else if (action === 'say') r = radio.hostSay(body.text);
+      else if (action === 'alerts/clear') r = radio.clearAlert(String(body.id || ''));
+      else return json(res, 404, { ok: false, error: '没有这个操作' });
+      return json(res, r.ok ? 200 : 400, { ...r, radio: radio.radioView() });
+    }
+
+    /* Fish 流式语音：还在合成就边收边转发，合成完了就当普通缓存文件给 */
+    if (p.startsWith('/api/voice/stream/') && req.method === 'GET') {
+      const name = p.slice('/api/voice/stream/'.length);
+      const m = /^([a-f0-9]{20})\.mp3$/i.exec(name);
+      if (!m) return json(res, 404, { ok: false, error: '没有这段语音' });
+      const live = getFishStream(m[1]);
+      if (live && !live.error) return pipeFishStream(live, res);
+      const file = voiceMediaPath(name);
+      if (!file) return json(res, 404, { ok: false, error: '没有这段语音' });
+      return streamFile(req, res, file);
     }
 
     if (p.startsWith('/api/voice/') && req.method === 'GET') {
@@ -1835,6 +1925,28 @@ const server = createServer(async (req, res) => {
   }
 });
 
+/* 电台：依赖由这里注入（广播、记账、语音参数） */
+function costFor(usage) {
+  const cfg = getConfig();
+  return costOf(usage, ratesFor(cfg.pricing, cfg.ai.model));
+}
+radio.initRadio({
+  getConfig,
+  updateConfig,
+  saveConfig,
+  broadcast,
+  log: (m) => console.log(m),
+  voiceOpts: (extra) => voiceOptsOf(getConfig(), extra),
+  recordUsage: (usage) => usage && addUsageOnly({ usage, cost: costFor(usage) }),
+  recordAi: (text, kind, usage) => {
+    const ev = usage ? addAiUsage({ usage, cost: costFor(usage), replyText: text }) : addAiEvent({ text, source: kind });
+    ev.voiceOnly = true;
+    ev.sayKind = kind;
+    pushEvent(ev);
+    if (usage) console.log(`[radio] ${kind} → ${text.slice(0, 30)}… in=${usage.prompt_tokens ?? 0} out=${usage.completion_tokens ?? 0}`);
+  },
+});
+
 server.listen(PORT_FINAL, '127.0.0.1', () => {
   const cfg = getConfig();
   console.log('');
@@ -1846,7 +1958,8 @@ server.listen(PORT_FINAL, '127.0.0.1', () => {
   console.log('');
   if (getState().currentSong && !getState().currentSong.url) resolveCurrent({ force: true });
   if (cfg.demo) startDemo();
-  if (cfg.novel?.enabled && cfg.novel?.auto) {
+  if (isRadio()) console.log('  📻 御姐大肥鱼电台：竖屏页 /，操作台「电台」分区可接管、静音、换话题');
+  if (!isRadio() && cfg.novel?.enabled && cfg.novel?.auto) {
     const list = listNovels(cfg);
     if (!list.length) {
       console.log(`  📖 小说朗读：「${cfg.novel?.dir || '短篇'}」里还没有小说，放一个 .txt 进去就会自动念`);
